@@ -64,10 +64,33 @@ class SSDMFO3Config:
 
 
 class MeanFieldSolverV3:
-    """MFVI Solver V3 - With individual responses and Gumbel noise"""
+    """MFVI Solver V3 - With individual responses and Gumbel noise
+
+    OPTIMIZED: Vectorized operations, cached alpha, fast softmax
+    """
 
     def __init__(self, config: SSDMFO3Config):
         self.config = config
+        # Cache for flattened alpha (avoid repeated flatten)
+        self._alpha_cache = None
+        self._alpha_version = -1
+
+    def _get_alpha_flat(self, potentials: DualPotentials) -> Dict[str, np.ndarray]:
+        """Get cached flattened alpha potentials"""
+        # Simple version check using id (potentials object identity)
+        pot_id = id(potentials)
+        if self._alpha_cache is None or self._alpha_version != pot_id:
+            self._alpha_cache = {
+                'H': potentials.alpha_H.ravel(),  # ravel is faster than flatten when possible
+                'W': potentials.alpha_W.ravel(),
+                'O': potentials.alpha_O.ravel()
+            }
+            self._alpha_version = pot_id
+        return self._alpha_cache
+
+    def invalidate_cache(self):
+        """Call after potentials are updated"""
+        self._alpha_cache = None
 
     def compute_user_response_individual(self,
                                          user: UserPattern,
@@ -76,100 +99,90 @@ class MeanFieldSolverV3:
                                          temperature: float,
                                          gumbel_scale: float,
                                          use_beta: bool = True) -> np.ndarray:
-        """Compute individual response Q_i for a single user
-
-        Key differences from V2:
-        1. Each user gets INDEPENDENT Gumbel noise
-        2. Iterative MFVI with beta coupling
-        3. No template sharing
-
-        Args:
-            user: User pattern
-            potentials: Current potentials
-            grid_size: Number of grid cells
-            temperature: Current temperature
-            gumbel_scale: Scale of Gumbel noise
-            use_beta: Whether to use beta (interaction) potentials
-
-        Returns:
-            Q: (n_locations, grid_size) - individual distribution for this user
-        """
+        """Compute individual response Q_i for a single user - OPTIMIZED"""
         n_locs = len(user.locations)
         loc_types = [loc.type for loc in user.locations]
 
-        # Get alpha potentials (flattened)
-        alpha_flat = {
-            'H': potentials.alpha_H.flatten(),
-            'W': potentials.alpha_W.flatten(),
-            'O': potentials.alpha_O.flatten()
-        }
+        # Use cached alpha
+        alpha_flat = self._get_alpha_flat(potentials)
 
-        # Initialize Q with Gumbel noise (KEY: individual noise per user)
-        Q = np.zeros((n_locs, grid_size))
+        # VECTORIZED: Initialize all Q at once
+        Q = np.empty((n_locs, grid_size))
+
+        # Generate all Gumbel noise at once
+        all_gumbel = np.random.gumbel(0, gumbel_scale, (n_locs, grid_size))
+
+        # Vectorized softmax initialization
         for i, lt in enumerate(loc_types):
-            # Gumbel noise for diversity (different for each user!)
-            gumbel = np.random.gumbel(0, gumbel_scale, grid_size)
-            log_q = -alpha_flat[lt] / temperature + gumbel
-            log_q -= log_q.max()
-            q = np.exp(log_q)
-            q /= q.sum() + 1e-10
-            Q[i] = q
+            log_q = -alpha_flat[lt] / temperature + all_gumbel[i]
+            log_q -= log_q.max()  # Numerical stability
+            Q[i] = np.exp(log_q)
+            Q[i] /= Q[i].sum() + 1e-10
 
-        # Iterative MFVI with beta coupling
+        # Iterative MFVI with beta coupling (only if beta has content)
         if use_beta and self.config.mfvi_iter > 0:
-            Q = self._iterative_mfvi(
-                Q, loc_types, potentials, alpha_flat,
-                grid_size, temperature, gumbel_scale
-            )
+            # Check if any beta has non-zero entries
+            has_beta = (potentials.beta_HW is not None and potentials.beta_HW.nnz > 0) or \
+                      (potentials.beta_HO is not None and potentials.beta_HO.nnz > 0) or \
+                      (potentials.beta_WO is not None and potentials.beta_WO.nnz > 0)
+            if has_beta:
+                Q = self._iterative_mfvi_fast(
+                    Q, loc_types, potentials, alpha_flat,
+                    grid_size, temperature, gumbel_scale
+                )
 
         return Q
 
-    def _iterative_mfvi(self,
-                        Q: np.ndarray,
-                        loc_types: List[str],
-                        potentials: DualPotentials,
-                        alpha_flat: Dict[str, np.ndarray],
-                        grid_size: int,
-                        temperature: float,
-                        gumbel_scale: float) -> np.ndarray:
-        """Iterative MFVI with beta coupling
-
-        Update rule:
-        Q(l) <- softmax((-alpha_c - sum_{l'} beta_{cc'} @ Q(l') + gumbel) / T)
-        """
+    def _iterative_mfvi_fast(self,
+                             Q: np.ndarray,
+                             loc_types: List[str],
+                             potentials: DualPotentials,
+                             alpha_flat: Dict[str, np.ndarray],
+                             grid_size: int,
+                             temperature: float,
+                             gumbel_scale: float) -> np.ndarray:
+        """OPTIMIZED Iterative MFVI - reduced redundant computation"""
         n_locs = len(loc_types)
+        damping = self.config.mfvi_damping
+        inv_temp = 1.0 / temperature  # Precompute
+
+        # Precompute which beta matrices to use for each (i,j) pair
+        beta_lookup = {}
+        for i in range(n_locs):
+            for j in range(n_locs):
+                if i != j:
+                    beta = potentials.get_beta(loc_types[i], loc_types[j])
+                    if beta is not None and beta.nnz > 0:
+                        beta_lookup[(i, j)] = beta
+
+        # If no beta interactions, skip MFVI entirely
+        if not beta_lookup:
+            return Q
 
         for mfvi_iter in range(self.config.mfvi_iter):
             Q_old = Q.copy()
+            noise_scale = gumbel_scale * (0.5 ** mfvi_iter)
+
+            # Generate all noise at once for this iteration
+            all_gumbel = np.random.gumbel(0, noise_scale, (n_locs, grid_size))
 
             for i in range(n_locs):
-                loc_type = loc_types[i]
-
                 # Start with alpha field
-                field = alpha_flat[loc_type].copy()
+                field = alpha_flat[loc_types[i]].copy()
 
-                # Add beta interaction with other locations
+                # Add beta interactions (using precomputed lookup)
                 for j in range(n_locs):
-                    if i == j:
-                        continue
-                    other_type = loc_types[j]
-                    beta = potentials.get_beta(loc_type, other_type)
-                    if beta is not None and beta.nnz > 0:
-                        # Sparse matrix-vector multiplication
-                        field += beta.dot(Q_old[j])
+                    if (i, j) in beta_lookup:
+                        field += beta_lookup[(i, j)].dot(Q_old[j])
 
-                # Add Gumbel noise (decreasing with MFVI iterations)
-                noise_scale = gumbel_scale * (0.5 ** mfvi_iter)
-                gumbel = np.random.gumbel(0, noise_scale, grid_size)
-
-                # Softmax with temperature
-                log_q = (-field + gumbel) / temperature
+                # Fast softmax
+                log_q = (-field + all_gumbel[i]) * inv_temp
                 log_q -= log_q.max()
                 q_new = np.exp(log_q)
-                q_new /= q_new.sum() + 1e-10
+                q_new *= (1.0 / (q_new.sum() + 1e-10))  # Faster than /=
 
                 # Damped update
-                Q[i] = self.config.mfvi_damping * q_new + (1 - self.config.mfvi_damping) * Q_old[i]
+                Q[i] = damping * q_new + (1 - damping) * Q_old[i]
 
         return Q
 
@@ -180,15 +193,63 @@ class MeanFieldSolverV3:
                                 temperature: float,
                                 gumbel_scale: float,
                                 use_beta: bool = True) -> Dict[int, np.ndarray]:
-        """Compute responses for a batch of users"""
+        """Compute responses for a batch of users - OPTIMIZED"""
+        # Precompute alpha_flat ONCE for entire batch
+        alpha_flat = {
+            'H': potentials.alpha_H.ravel(),
+            'W': potentials.alpha_W.ravel(),
+            'O': potentials.alpha_O.ravel()
+        }
+
+        # Check beta status ONCE
+        has_beta = use_beta and self.config.mfvi_iter > 0 and (
+            (potentials.beta_HW is not None and potentials.beta_HW.nnz > 0) or
+            (potentials.beta_HO is not None and potentials.beta_HO.nnz > 0) or
+            (potentials.beta_WO is not None and potentials.beta_WO.nnz > 0)
+        )
+
         responses = {}
+        inv_temp = 1.0 / temperature
+
         for user_id, user in user_batch.items():
-            Q = self.compute_user_response_individual(
-                user, potentials, grid_size,
-                temperature, gumbel_scale, use_beta
+            Q = self._compute_user_fast(
+                user, potentials, alpha_flat, grid_size,
+                temperature, inv_temp, gumbel_scale, has_beta
             )
             responses[user_id] = Q
         return responses
+
+    def _compute_user_fast(self,
+                           user: UserPattern,
+                           potentials: DualPotentials,
+                           alpha_flat: Dict[str, np.ndarray],
+                           grid_size: int,
+                           temperature: float,
+                           inv_temp: float,
+                           gumbel_scale: float,
+                           has_beta: bool) -> np.ndarray:
+        """Fast single-user computation with precomputed alpha"""
+        n_locs = len(user.locations)
+        loc_types = [loc.type for loc in user.locations]
+
+        # Initialize Q with vectorized Gumbel noise
+        Q = np.empty((n_locs, grid_size))
+        all_gumbel = np.random.gumbel(0, gumbel_scale, (n_locs, grid_size))
+
+        for i, lt in enumerate(loc_types):
+            log_q = -alpha_flat[lt] * inv_temp + all_gumbel[i]
+            log_q -= log_q.max()
+            Q[i] = np.exp(log_q)
+            Q[i] *= (1.0 / (Q[i].sum() + 1e-10))
+
+        # MFVI only if beta has content
+        if has_beta:
+            Q = self._iterative_mfvi_fast(
+                Q, loc_types, potentials, alpha_flat,
+                grid_size, temperature, gumbel_scale
+            )
+
+        return Q
 
 
 class SSDMFOv3(BaseMethod):
@@ -388,15 +449,14 @@ class SSDMFOv3(BaseMethod):
         # Final pass: use best potentials with moderate diversity
         print(f"\n[SS-DMFO 3.0] Computing final allocations...")
         print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
-        final_responses = {}
-        for user_id, user in user_patterns.items():
-            Q = self.mf_solver.compute_user_response_individual(
-                user, potentials, grid_size,
-                self.config.temp_final,
-                self.config.gumbel_final,  # Keep some noise for diversity!
-                use_beta=True
-            )
-            final_responses[user_id] = Q
+
+        # Use optimized batch method for final pass
+        final_responses = self.mf_solver.compute_batch_responses(
+            user_patterns, potentials, grid_size,
+            self.config.temp_final,
+            self.config.gumbel_final,  # Keep some noise for diversity!
+            use_beta=True
+        )
 
         return final_responses
 
@@ -457,7 +517,7 @@ class SSDMFOv3(BaseMethod):
     def _add_pairwise(self, locs1: List[np.ndarray], locs2: List[np.ndarray],
                       top_k: int, grid_size: int,
                       data: List, rows: List, cols: List):
-        """Add pairwise interactions between two location sets"""
+        """Add pairwise interactions - VECTORIZED version"""
         # Sum distributions for each type
         q1 = np.sum(locs1, axis=0)
         q2 = np.sum(locs2, axis=0)
@@ -479,14 +539,17 @@ class SSDMFOv3(BaseMethod):
         p1 = p1 / (p1.sum() + 1e-10)
         p2 = p2 / (p2.sum() + 1e-10)
 
-        # Compute outer product entries
-        for i, i1 in enumerate(idx1):
-            for j, i2 in enumerate(idx2):
-                val = p1[i] * p2[j]
-                if val > 1e-15:
-                    rows.append(i1)
-                    cols.append(i2)
-                    data.append(val)
+        # VECTORIZED: Compute outer product and extract non-zero entries
+        outer = np.outer(p1, p2)  # (len(idx1), len(idx2))
+        mask = outer > 1e-15
+
+        # Use meshgrid to get all index combinations
+        i_mesh, j_mesh = np.meshgrid(idx1, idx2, indexing='ij')
+
+        # Extract matching entries (numpy operations, no Python loop)
+        data.extend(outer[mask].tolist())
+        rows.extend(i_mesh[mask].tolist())
+        cols.extend(j_mesh[mask].tolist())
 
     def _update_beta(self, potentials: DualPotentials,
                      gen: InteractionConstraints,

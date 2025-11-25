@@ -1,4 +1,4 @@
-"""SS-DMFO 8Ã!W"""
+"""SS-DMFO"""
 
 from .potentials import DualPotentials, PotentialsWithMomentum
 from .mean_field import MeanFieldSolver, FastMeanFieldSolver

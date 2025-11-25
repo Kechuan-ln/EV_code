@@ -123,7 +123,7 @@ def main():
 
         config = GPUConfig(
             max_iter=60,
-            batch_size=min(n_users, 1000),
+            gpu_batch_size=min(n_users, 500),  # Batch size for GPU (avoid OOM)
             mfvi_iter=3,
             temp_init=2.0,
             temp_final=1.0,

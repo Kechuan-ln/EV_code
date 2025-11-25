@@ -55,8 +55,9 @@ class GPUConfig:
     gumbel_decay: float = 0.995
     gumbel_final: float = 0.05
 
-    # Batch size (GPU can handle all users at once)
-    batch_size: int = 1000  # Much larger than CPU version
+    # Batch size for GPU processing (to avoid OOM)
+    # Adjust based on GPU memory: 500 for 8GB, 1000 for 16GB, 2000 for 24GB
+    gpu_batch_size: int = 500
 
     # Logging
     log_freq: int = 5
@@ -238,10 +239,23 @@ class SSDMFOv3GPU(BaseMethod):
         # Initialize potentials on GPU
         potentials = GPUPotentials(grid_h, grid_w, self.device, self.dtype)
 
-        # Preprocess user data for batching
+        # Preprocess user data - split into batches to avoid OOM
         print(f"[SS-DMFO GPU] Preprocessing user data...")
-        user_data = BatchedUserData(user_patterns, self.device)
-        print(f"  Max locations per user: {user_data.max_locs}")
+        gpu_batch_size = self.config.gpu_batch_size
+        user_id_list = list(user_patterns.keys())
+        n_batches = (n_users + gpu_batch_size - 1) // gpu_batch_size
+        print(f"  GPU batch size: {gpu_batch_size}, num batches: {n_batches}")
+
+        # Create batched user data objects
+        user_data_batches = []
+        for batch_idx in range(n_batches):
+            start = batch_idx * gpu_batch_size
+            end = min(start + gpu_batch_size, n_users)
+            batch_ids = user_id_list[start:end]
+            batch_patterns = {uid: user_patterns[uid] for uid in batch_ids}
+            user_data_batches.append(BatchedUserData(batch_patterns, self.device))
+
+        print(f"  Max locations per user: {max(b.max_locs for b in user_data_batches)}")
 
         # Early stopping
         best_interaction_loss = float('inf')
@@ -277,17 +291,33 @@ class SSDMFOv3GPU(BaseMethod):
             )
 
             # ============================================
-            # GPU BATCH FORWARD PASS
+            # GPU BATCH FORWARD PASS (process in batches to avoid OOM)
             # ============================================
-            Q = self._batch_forward_gpu(
-                user_data, potentials, grid_size,
-                temperature, gumbel_scale, use_beta
-            )
+            gen_H = torch.zeros(grid_size, device=self.device, dtype=self.dtype)
+            gen_W = torch.zeros(grid_size, device=self.device, dtype=self.dtype)
+            gen_O = torch.zeros(grid_size, device=self.device, dtype=self.dtype)
 
-            # ============================================
-            # AGGREGATE SPATIAL STATISTICS
-            # ============================================
-            gen_H, gen_W, gen_O = self._aggregate_spatial_gpu(Q, user_data, grid_size)
+            all_Q_cpu = []  # Store Q for interaction computation
+
+            for batch_idx, user_data in enumerate(user_data_batches):
+                Q = self._batch_forward_gpu(
+                    user_data, potentials, grid_size,
+                    temperature, gumbel_scale, use_beta
+                )
+
+                # Aggregate spatial statistics for this batch
+                batch_H, batch_W, batch_O = self._aggregate_spatial_gpu(Q, user_data, grid_size)
+                gen_H += batch_H
+                gen_W += batch_W
+                gen_O += batch_O
+
+                # Store Q for interaction (only when needed)
+                if constraints.interaction is not None and not in_phase1 and iteration % self.config.interaction_freq == 0:
+                    all_Q_cpu.append((user_data, Q.cpu().numpy()))
+
+                # Free GPU memory
+                del Q
+                torch.cuda.empty_cache()
 
             # Normalize
             gen_H = gen_H / (gen_H.sum() + 1e-10)
@@ -311,11 +341,9 @@ class SSDMFOv3GPU(BaseMethod):
             # INTERACTION (less frequent)
             # ============================================
             interaction_loss = 0.0
-            if constraints.interaction is not None and not in_phase1 and iteration % self.config.interaction_freq == 0:
-                # Move Q to CPU for interaction computation (sparse ops)
-                Q_cpu = Q.cpu().numpy()
-                interaction_loss, gen_interaction = self._compute_interaction_cpu(
-                    Q_cpu, user_data, user_patterns, grid_size, constraints.interaction
+            if all_Q_cpu:  # Only compute if we collected Q
+                interaction_loss, gen_interaction = self._compute_interaction_cpu_batched(
+                    all_Q_cpu, user_patterns, grid_size, constraints.interaction
                 )
 
                 # Early stopping
@@ -347,21 +375,25 @@ class SSDMFOv3GPU(BaseMethod):
                     potentials.restore_state(best_state)
                 break
 
-        # Final pass
+        # Final pass (also in batches)
         print(f"\n[SS-DMFO GPU] Computing final allocations...")
         print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
 
-        Q_final = self._batch_forward_gpu(
-            user_data, potentials, grid_size,
-            self.config.temp_final, self.config.gumbel_final, use_beta=True
-        )
-
-        # Convert to output format
-        Q_np = Q_final.cpu().numpy()
         final_responses = {}
-        for u_idx, user_id in enumerate(user_data.user_ids):
-            n = user_data.n_locs[u_idx].item()
-            final_responses[user_id] = Q_np[u_idx, :n, :]
+        for user_data in user_data_batches:
+            Q_final = self._batch_forward_gpu(
+                user_data, potentials, grid_size,
+                self.config.temp_final, self.config.gumbel_final, use_beta=True
+            )
+
+            # Convert to output format
+            Q_np = Q_final.cpu().numpy()
+            for u_idx, user_id in enumerate(user_data.user_ids):
+                n = user_data.n_locs[u_idx].item()
+                final_responses[user_id] = Q_np[u_idx, :n, :]
+
+            del Q_final
+            torch.cuda.empty_cache()
 
         return final_responses
 
@@ -380,6 +412,7 @@ class SSDMFOv3GPU(BaseMethod):
         """
         n_users = user_data.n_users
         max_locs = user_data.max_locs
+        inv_temp = 1.0 / temperature
 
         # Stack alpha for vectorized lookup
         alpha_stack = torch.stack([potentials.alpha_H, potentials.alpha_W, potentials.alpha_O])
@@ -394,9 +427,9 @@ class SSDMFOv3GPU(BaseMethod):
             (n_users, max_locs, grid_size)
         ).to(self.device, self.dtype)
 
-        # Compute log Q = (-alpha + gumbel) / T
-        inv_temp = 1.0 / temperature
-        log_Q = (-alpha_per_loc + gumbel) * inv_temp
+        # FIX: Compute log Q = -alpha/T + gumbel (gumbel NOT scaled by temperature!)
+        # This matches the CPU version behavior
+        log_Q = -alpha_per_loc * inv_temp + gumbel
 
         # Softmax along grid dimension
         Q = F.softmax(log_Q, dim=-1)  # (n_users, max_locs, grid_size)
@@ -418,13 +451,20 @@ class SSDMFOv3GPU(BaseMethod):
                   alpha_per_loc: torch.Tensor,
                   temperature: float,
                   gumbel_scale: float) -> torch.Tensor:
-        """GPU-accelerated MFVI iterations"""
+        """GPU-accelerated MFVI iterations - memory optimized"""
         n_users, max_locs, grid_size = Q.shape
         damping = self.config.mfvi_damping
         inv_temp = 1.0 / temperature
 
+        # Check if any beta has content
+        has_HW = potentials.beta_HW is not None and potentials.beta_HW._nnz() > 0
+        has_HO = potentials.beta_HO is not None and potentials.beta_HO._nnz() > 0
+        has_WO = potentials.beta_WO is not None and potentials.beta_WO._nnz() > 0
+
+        if not (has_HW or has_HO or has_WO):
+            return Q  # No beta interactions, skip MFVI
+
         for mfvi_iter in range(self.config.mfvi_iter):
-            Q_old = Q.clone()
             noise_scale = gumbel_scale * (0.5 ** mfvi_iter)
 
             # Generate noise
@@ -435,42 +475,51 @@ class SSDMFOv3GPU(BaseMethod):
             # For each location, compute field = alpha + sum_j beta @ Q_j
             field = alpha_per_loc.clone()
 
-            # Add beta interactions (simplified: aggregate by type)
             # Sum Q by type: H_sum, W_sum, O_sum for each user
-            H_sum = (Q_old * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
-            W_sum = (Q_old * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
-            O_sum = (Q_old * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+            H_sum = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
+            W_sum = (Q * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+            O_sum = (Q * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
 
             # Apply beta interactions
-            if potentials.beta_HW is not None and potentials.beta_HW._nnz() > 0:
+            if has_HW:
                 # H locations get contribution from W
-                HW_contrib = torch.sparse.mm(potentials.beta_HW, W_sum.T).T  # (n_users, grid_size)
+                HW_contrib = torch.sparse.mm(potentials.beta_HW, W_sum.T).T
                 field = field + user_data.H_mask.unsqueeze(-1).float() * HW_contrib.unsqueeze(1)
                 # W locations get contribution from H
                 WH_contrib = torch.sparse.mm(potentials.beta_HW.T, H_sum.T).T
                 field = field + user_data.W_mask.unsqueeze(-1).float() * WH_contrib.unsqueeze(1)
 
-            if potentials.beta_HO is not None and potentials.beta_HO._nnz() > 0:
+            if has_HO:
                 HO_contrib = torch.sparse.mm(potentials.beta_HO, O_sum.T).T
                 field = field + user_data.H_mask.unsqueeze(-1).float() * HO_contrib.unsqueeze(1)
                 OH_contrib = torch.sparse.mm(potentials.beta_HO.T, H_sum.T).T
                 field = field + user_data.O_mask.unsqueeze(-1).float() * OH_contrib.unsqueeze(1)
 
-            if potentials.beta_WO is not None and potentials.beta_WO._nnz() > 0:
+            if has_WO:
                 WO_contrib = torch.sparse.mm(potentials.beta_WO, O_sum.T).T
                 field = field + user_data.W_mask.unsqueeze(-1).float() * WO_contrib.unsqueeze(1)
                 OW_contrib = torch.sparse.mm(potentials.beta_WO.T, W_sum.T).T
                 field = field + user_data.O_mask.unsqueeze(-1).float() * OW_contrib.unsqueeze(1)
 
-            # Softmax
-            log_Q = (-field + gumbel) * inv_temp
+            # FIX: Softmax with correct temperature scaling (gumbel NOT scaled)
+            log_Q = -field * inv_temp + gumbel
             Q_new = F.softmax(log_Q, dim=-1)
 
-            # Damped update
-            Q = damping * Q_new + (1 - damping) * Q_old
+            # Damped update (in-place to save memory)
+            Q = damping * Q_new + (1 - damping) * Q
 
             # Zero out padded
             Q = Q * user_data.valid_mask.unsqueeze(-1).float()
+
+            # Free intermediate tensors
+            del gumbel, field, Q_new, H_sum, W_sum, O_sum
+            if has_HW:
+                del HW_contrib, WH_contrib
+            if has_HO:
+                del HO_contrib, OH_contrib
+            if has_WO:
+                del WO_contrib, OW_contrib
+            torch.cuda.empty_cache()
 
         return Q
 
@@ -503,13 +552,64 @@ class SSDMFOv3GPU(BaseMethod):
 
         return ((jsd_H + jsd_W + jsd_O) / 3).item()
 
+    def _compute_interaction_cpu_batched(self,
+                                         all_Q_cpu: List[Tuple[BatchedUserData, np.ndarray]],
+                                         user_patterns: Dict[int, UserPattern],
+                                         grid_size: int,
+                                         real_interaction: InteractionConstraints) -> Tuple[float, InteractionConstraints]:
+        """Compute interaction on CPU from batched Q data"""
+        top_k = self.config.top_k
+
+        # Collect all user locations by type
+        user_locs = {}
+
+        for user_data, Q_np in all_Q_cpu:
+            for u_idx, user_id in enumerate(user_data.user_ids):
+                n = user_data.n_locs[u_idx].item()
+                Q = Q_np[u_idx, :n, :]
+
+                user_locs[user_id] = {'H': [], 'W': [], 'O': []}
+                pattern = user_patterns[user_id]
+                for loc_idx, loc in enumerate(pattern.locations):
+                    user_locs[user_id][loc.type].append(Q[loc_idx])
+
+        # Compute interactions
+        hw_data, hw_rows, hw_cols = [], [], []
+        ho_data, ho_rows, ho_cols = [], [], []
+        wo_data, wo_rows, wo_cols = [], [], []
+
+        for user_id in user_locs.keys():
+            H_locs = user_locs[user_id]['H']
+            W_locs = user_locs[user_id]['W']
+            O_locs = user_locs[user_id]['O']
+
+            if H_locs and W_locs:
+                self._add_pairwise_fast(H_locs, W_locs, top_k, grid_size, hw_data, hw_rows, hw_cols)
+            if H_locs and O_locs:
+                self._add_pairwise_fast(H_locs, O_locs, top_k, grid_size, ho_data, ho_rows, ho_cols)
+            if W_locs and O_locs:
+                self._add_pairwise_fast(W_locs, O_locs, top_k, grid_size, wo_data, wo_rows, wo_cols)
+
+        # Build sparse matrices
+        HW = sparse.csr_matrix((hw_data, (hw_rows, hw_cols)), shape=(grid_size, grid_size)) if hw_data else sparse.csr_matrix((grid_size, grid_size))
+        HO = sparse.csr_matrix((ho_data, (ho_rows, ho_cols)), shape=(grid_size, grid_size)) if ho_data else sparse.csr_matrix((grid_size, grid_size))
+        WO = sparse.csr_matrix((wo_data, (wo_rows, wo_cols)), shape=(grid_size, grid_size)) if wo_data else sparse.csr_matrix((grid_size, grid_size))
+
+        gen_interaction = InteractionConstraints(HW=HW, HO=HO, WO=WO)
+        gen_interaction.normalize()
+
+        # Compute JSD
+        loss = self._interaction_jsd_cpu(gen_interaction, real_interaction)
+
+        return loss, gen_interaction
+
     def _compute_interaction_cpu(self,
                                  Q_np: np.ndarray,
                                  user_data: BatchedUserData,
                                  user_patterns: Dict[int, UserPattern],
                                  grid_size: int,
                                  real_interaction: InteractionConstraints) -> Tuple[float, InteractionConstraints]:
-        """Compute interaction on CPU (sparse operations)"""
+        """Compute interaction on CPU (sparse operations) - single batch version"""
         top_k = self.config.top_k
 
         # Build responses dict
@@ -629,10 +729,14 @@ class SSDMFOv3GPU(BaseMethod):
                 # Compute gradient on CPU
                 grad = gen_mat - real_mat
 
-                # Convert to torch sparse
+                # Convert to torch sparse (FIX: use np.array to avoid warning)
                 grad_coo = grad.tocoo()
-                indices = torch.tensor([grad_coo.row, grad_coo.col], dtype=torch.long)
-                values = torch.tensor(grad_coo.data, dtype=self.dtype)
+                indices = torch.from_numpy(
+                    np.vstack([grad_coo.row, grad_coo.col]).astype(np.int64)
+                ).to(self.device)
+                values = torch.from_numpy(
+                    grad_coo.data.astype(np.float32 if self.dtype == torch.float32 else np.float64)
+                ).to(self.device)
                 grad_torch = torch.sparse_coo_tensor(
                     indices, values, grad.shape, device=self.device, dtype=self.dtype
                 ).coalesce()

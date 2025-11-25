@@ -64,7 +64,7 @@ class GPUConfig:
 
     # Interaction
     interaction_freq: int = 2       # More frequent interaction updates
-    top_k: int = 200                # Increased for better interaction coverage
+    top_k: int = 500                # Important cells count (500×500=250K interactions)
 
     # Early stopping
     early_stop_patience: int = 15   # More patience for interaction improvement
@@ -635,76 +635,84 @@ class SSDMFOv3GPU(BaseMethod):
                                  user_data: BatchedUserData,
                                  grid_size: int,
                                  real_interaction: InteractionConstraints) -> Tuple[float, 'InteractionConstraints']:
-        """GPU-accelerated interaction computation - uses REAL constraint indices
+        """Smart interaction computation: Important Cells + Sparse Outer Products
 
-        Key insight: Instead of arbitrary top_k, we evaluate at the SAME positions
-        as the real data, ensuring structural alignment.
+        Strategy:
+        1. Identify important cells from real spatial constraints (foundation)
+        2. For each user, compute sparse outer product (captures true correlation)
+        3. Aggregate across users (true joint distribution, not independence)
+
+        This avoids the 40885×40885 full matrix while capturing real correlations.
         """
         n_users = user_data.n_users
+        n_important = self.config.top_k  # Reuse top_k as number of important cells
 
-        # Aggregate Q by type for each user: (n_users, grid_size)
-        H_agg = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)
+        # Step 1: Identify important cells from aggregate distributions
+        # These are cells where users actually have significant probability
+        H_agg = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
         W_agg = (Q * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
         O_agg = (Q * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
 
-        # Sum across users to get aggregate distribution
+        # Get important cell indices based on total probability mass
         H_total = H_agg.sum(dim=0)  # (grid_size,)
         W_total = W_agg.sum(dim=0)
         O_total = O_agg.sum(dim=0)
 
-        # Normalize to probability distributions
-        H_prob = H_total / (H_total.sum() + 1e-10)
-        W_prob = W_total / (W_total.sum() + 1e-10)
-        O_prob = O_total / (O_total.sum() + 1e-10)
+        _, H_important = torch.topk(H_total, min(n_important, grid_size))
+        _, W_important = torch.topk(W_total, min(n_important, grid_size))
+        _, O_important = torch.topk(O_total, min(n_important, grid_size))
 
-        # Compute interaction at REAL constraint positions (not arbitrary top_k)
-        # This ensures we compare at the same positions as the real data
-        def compute_at_real_positions(prob1, prob2, real_mat, name):
-            """Compute generated interaction values at real constraint positions"""
-            real_coo = real_mat.tocoo()
-            if real_coo.nnz == 0:
-                return sparse.csr_matrix((grid_size, grid_size)), 0.0
+        # Step 2: For each user, compute sparse outer product at important positions only
+        # Extract values at important positions: (n_users, n_important)
+        H_vals = H_agg[:, H_important]
+        W_vals = W_agg[:, W_important]
+        O_vals = O_agg[:, O_important]
 
-            # Sample if too many (for speed)
-            max_samples = 50000
-            if real_coo.nnz > max_samples:
-                idx = np.random.choice(real_coo.nnz, max_samples, replace=False)
-                rows, cols = real_coo.row[idx], real_coo.col[idx]
-                real_vals = real_coo.data[idx]
-            else:
-                rows, cols = real_coo.row, real_coo.col
-                real_vals = real_coo.data
+        # Normalize per user (each user's contribution should sum to 1)
+        H_vals = H_vals / (H_vals.sum(dim=1, keepdim=True) + 1e-10)
+        W_vals = W_vals / (W_vals.sum(dim=1, keepdim=True) + 1e-10)
+        O_vals = O_vals / (O_vals.sum(dim=1, keepdim=True) + 1e-10)
 
-            # Get generated probabilities at these positions
-            rows_t = torch.from_numpy(rows).long().to(self.device)
-            cols_t = torch.from_numpy(cols).long().to(self.device)
+        # Compute outer products for ALL users at once: (n_users, n_important, n_important)
+        # This captures the TRUE correlation structure per user
+        HW_outer = torch.bmm(H_vals.unsqueeze(2), W_vals.unsqueeze(1))
+        HO_outer = torch.bmm(H_vals.unsqueeze(2), O_vals.unsqueeze(1))
+        WO_outer = torch.bmm(W_vals.unsqueeze(2), O_vals.unsqueeze(1))
 
-            gen_vals = (prob1[rows_t] * prob2[cols_t]).cpu().numpy()
+        # Step 3: Aggregate across users (mean, not sum, to get probability)
+        HW_agg = HW_outer.mean(dim=0)  # (n_important, n_important)
+        HO_agg = HO_outer.mean(dim=0)
+        WO_agg = WO_outer.mean(dim=0)
 
-            # Normalize both
-            gen_vals = gen_vals / (gen_vals.sum() + 1e-10)
-            real_vals = real_vals / (real_vals.sum() + 1e-10)
+        # Convert to CPU numpy
+        HW_np = HW_agg.cpu().numpy()
+        HO_np = HO_agg.cpu().numpy()
+        WO_np = WO_agg.cpu().numpy()
 
-            # Compute JSD directly
-            m = 0.5 * (gen_vals + real_vals + 1e-10)
-            jsd = 0.5 * (np.sum(gen_vals * np.log((gen_vals + 1e-10) / m)) +
-                        np.sum(real_vals * np.log((real_vals + 1e-10) / m)))
+        H_idx = H_important.cpu().numpy()
+        W_idx = W_important.cpu().numpy()
+        O_idx = O_important.cpu().numpy()
 
-            # Build sparse matrix for beta update
-            gen_sparse = sparse.csr_matrix(
-                (gen_vals, (rows, cols)), shape=(grid_size, grid_size)
+        # Build sparse matrices with correct global indices
+        def build_sparse_interaction(values, row_idx, col_idx):
+            rows, cols = np.meshgrid(row_idx, col_idx, indexing='ij')
+            mask = values > 1e-10
+            if not np.any(mask):
+                return sparse.csr_matrix((grid_size, grid_size))
+            return sparse.csr_matrix(
+                (values[mask], (rows[mask], cols[mask])),
+                shape=(grid_size, grid_size)
             )
 
-            return gen_sparse, jsd
-
-        HW, jsd_hw = compute_at_real_positions(H_prob, W_prob, real_interaction.HW, "HW")
-        HO, jsd_ho = compute_at_real_positions(H_prob, O_prob, real_interaction.HO, "HO")
-        WO, jsd_wo = compute_at_real_positions(W_prob, O_prob, real_interaction.WO, "WO")
+        HW = build_sparse_interaction(HW_np, H_idx, W_idx)
+        HO = build_sparse_interaction(HO_np, H_idx, O_idx)
+        WO = build_sparse_interaction(WO_np, W_idx, O_idx)
 
         gen_interaction = InteractionConstraints(HW=HW, HO=HO, WO=WO)
+        gen_interaction.normalize()
 
-        # Average JSD
-        loss = (jsd_hw + jsd_ho + jsd_wo) / 3.0
+        # Compute JSD with real interaction
+        loss = self._interaction_jsd_cpu(gen_interaction, real_interaction)
 
         return loss, gen_interaction
 

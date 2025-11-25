@@ -133,7 +133,7 @@ def main():
             gumbel_decay=0.99,                 # Faster decay
             gumbel_final=0.01,                 # Lower noise floor
             interaction_freq=2,                # More frequent interaction updates
-            top_k=200,                         # INCREASED: more interaction coverage
+            top_k=500,                         # Important cells (500×500=250K interactions)
             log_freq=5,
             early_stop_patience=20,            # More patience
             phase_separation=True,

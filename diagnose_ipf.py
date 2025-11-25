@@ -2,7 +2,8 @@
 """诊断IPF的分配是否有意义"""
 
 import sys
-sys.path.insert(0, '/Volumes/FastACIS/Project/EVproject')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 from ssdmfo.data.loader import ConstraintDataLoader
@@ -11,7 +12,7 @@ from ssdmfo.baselines.ipf import IterativeProportionalFitting
 
 def main():
     print("Loading data...")
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
     constraints = loader.load_all_constraints(phase=1)
     users = loader.load_user_patterns(n_users=10)  # 只看10个用户
 

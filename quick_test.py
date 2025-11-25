@@ -2,7 +2,8 @@
 """快速测试各个基线方法"""
 
 import sys
-sys.path.insert(0, '/Volumes/FastACIS/Project/EVproject')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ssdmfo.data.loader import ConstraintDataLoader
 from ssdmfo.baselines.random import RandomBaseline
@@ -41,7 +42,7 @@ def test_single_method(method, constraints, users):
 def main():
     # 加载数据（小规模测试）
     print("Loading data...")
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
     constraints = loader.load_all_constraints(phase=1)
     users = loader.load_user_patterns(n_users=100)  # 先用100个用户快速测试
 

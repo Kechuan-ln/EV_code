@@ -2,7 +2,8 @@
 """Phase 2 测试脚本 - 验证交互约束的加载和评估"""
 
 import sys
-sys.path.insert(0, '/Volumes/FastACIS/Project/EVproject')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 from ssdmfo.data.loader import ConstraintDataLoader
@@ -17,9 +18,9 @@ def main():
     print("PHASE 2 TEST - Spatial + Interaction Constraints")
     print("=" * 70)
 
-    # Step 1: 加载Phase 2数据
-    print("\n[Step 1] Loading Phase 2 constraints...")
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    # Step 1: 加载数据
+    print("\n[Step 1] Loading data...")
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
     constraints = loader.load_all_constraints(phase=2)
 
     print(f"\nSpatial constraints: {constraints.grid_h} x {constraints.grid_w}")

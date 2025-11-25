@@ -2,7 +2,8 @@
 """方法对比脚本 - 运行所有基线方法并对比结果"""
 
 import sys
-sys.path.insert(0, '/Volumes/FastACIS/Project/EVproject')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 from collections import defaultdict
@@ -163,7 +164,7 @@ def main():
     """主函数"""
     # 加载数据
     print("Loading data...")
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
     constraints = loader.load_all_constraints(phase=1)
 
     # 使用1000用户测试

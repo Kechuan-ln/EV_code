@@ -210,7 +210,8 @@ class ConstraintDataLoader:
 
 def test_loader():
     """测试数据加载器"""
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    import os
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'EV_Splatting'))
 
     # 测试空间约束加载
     print("\n=== Testing Spatial Constraints ===")

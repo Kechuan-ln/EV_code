@@ -136,7 +136,8 @@ def test_gravity_model():
     from ..evaluation.metrics import MetricsCalculator
 
     # 加载数据
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    import os
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'EV_Splatting'))
     constraints = loader.load_all_constraints(phase=1)
     users = loader.load_user_patterns(n_users=100)
 

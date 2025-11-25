@@ -2,7 +2,8 @@
 """Phase 1 测试脚本 - 完整的端到端测试"""
 
 import sys
-sys.path.insert(0, '/Volumes/FastACIS/Project/EVproject')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ssdmfo.data.loader import ConstraintDataLoader
 from ssdmfo.baselines.random import RandomBaseline
@@ -17,7 +18,7 @@ def main():
 
     # Step 1: 加载数据
     print("\n[Step 1] Loading data...")
-    loader = ConstraintDataLoader('/Volumes/FastACIS/Project/EVproject/EV_Splatting')
+    loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
 
     # 加载约束
     constraints = loader.load_all_constraints(phase=1)

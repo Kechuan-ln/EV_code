@@ -56,8 +56,8 @@ class GPUConfig:
     gumbel_final: float = 0.01      # Lower floor for precise convergence
 
     # Batch size for GPU processing (to avoid OOM)
-    # Adjust based on GPU memory: 500 for 8GB, 1000 for 16GB, 2000 for 24GB
-    gpu_batch_size: int = 500
+    # Adjust based on GPU memory: 500 for 8GB, 1000 for 16GB, 2000+ for 24GB
+    gpu_batch_size: int = 2000
 
     # Logging
     log_freq: int = 5

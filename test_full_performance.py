@@ -57,6 +57,40 @@ def compute_hw_distances(result, user_patterns, grid_h, grid_w, cell_size_km=1.0
     return np.array(distances)
 
 
+def compute_unique_locations(result, user_patterns, threshold=0.01):
+    """Compute number of unique activity locations per user (Non-Home)
+
+    For each user, count cells where probability > threshold for W and O locations.
+    """
+    unique_counts = []
+
+    for user_id, alloc in result.allocations.items():
+        pattern = user_patterns[user_id]
+
+        unique_cells = set()
+        for loc_idx, loc in enumerate(pattern.locations):
+            if loc.type in ['W', 'O']:  # Non-home locations
+                # Get cells with probability above threshold
+                prob = alloc[loc_idx]
+                significant_cells = np.where(prob > threshold)[0]
+                unique_cells.update(significant_cells.tolist())
+
+        unique_counts.append(len(unique_cells))
+
+    return np.array(unique_counts)
+
+
+def compute_real_unique_locations(constraints, user_patterns):
+    """Estimate unique locations from real data patterns"""
+    # Each user has a fixed number of semantic locations
+    unique_counts = []
+    for user_id, pattern in user_patterns.items():
+        # Count non-home locations
+        n_non_home = sum(1 for loc in pattern.locations if loc.type in ['W', 'O'])
+        unique_counts.append(n_non_home)
+    return np.array(unique_counts)
+
+
 def compute_real_hw_distances(constraints, cell_size_km=1.0):
     """Compute Home-Work distances from real interaction constraints"""
     hw_coo = constraints.interaction.HW.tocoo()
@@ -88,6 +122,7 @@ def compute_real_hw_distances(constraints, cell_size_km=1.0):
 
 def visualize_results(constraints, gen_spatial, gen_interaction,
                       hw_distances_gen, hw_distances_real,
+                      unique_locs_gen, unique_locs_real,
                       save_path='results_visualization.png'):
     """Create comprehensive visualization"""
 
@@ -153,26 +188,21 @@ def visualize_results(constraints, gen_spatial, gen_interaction,
     else:
         ax.text(0.5, 0.5, 'No distance data', ha='center', va='center')
 
-    # 5. Interaction HW heatmap (sampled)
+    # 5. Unique Activity Locations (Non-Home)
     ax = axes[1, 1]
-    real_hw = constraints.interaction.HW.toarray()
-    gen_hw = gen_interaction.HW.toarray()
-
-    # Show top region only (where most mass is)
-    real_sum_row = real_hw.sum(axis=1)
-    real_sum_col = real_hw.sum(axis=0)
-    top_rows = np.argsort(real_sum_row)[-50:]
-    top_cols = np.argsort(real_sum_col)[-50:]
-
-    real_sub = real_hw[np.ix_(top_rows, top_cols)]
-    gen_sub = gen_hw[np.ix_(top_rows, top_cols)]
-
-    diff_sub = gen_sub - real_sub
-    im = ax.imshow(diff_sub, cmap='RdBu', vmin=-0.0001, vmax=0.0001)
-    ax.set_title('HW Interaction (Gen-Real, top 50×50)')
-    ax.set_xlabel('Work cells')
-    ax.set_ylabel('Home cells')
-    plt.colorbar(im, ax=ax)
+    if len(unique_locs_gen) > 0 and len(unique_locs_real) > 0:
+        max_locs = max(unique_locs_gen.max(), unique_locs_real.max()) + 1
+        bins = np.arange(0, min(max_locs, 40), 1)
+        ax.hist(unique_locs_real, bins=bins, density=True, alpha=0.5,
+                label=f'Real (N={len(unique_locs_real)})', color='red')
+        ax.hist(unique_locs_gen, bins=bins, density=True, alpha=0.5,
+                label=f'Gen (N={len(unique_locs_gen)})', color='green')
+        ax.set_title('Unique Activity Locations (Non-Home)')
+        ax.set_xlabel('Count')
+        ax.set_ylabel('Density')
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No location data', ha='center', va='center')
 
     # 6. Summary metrics
     ax = axes[1, 2]
@@ -247,9 +277,9 @@ def main():
     print(f"Grid: {constraints.grid_h} x {constraints.grid_w}")
     print(f"HW interactions: {constraints.interaction.HW.nnz:,}")
 
-    # Load users - use more for realistic test
-    n_users = 1000  # Realistic test size
-    print(f"\n[2] Loading {n_users} user patterns...")
+    # Load users - use ALL available for realistic test
+    n_users = None  # None = load all users (~93,000)
+    print(f"\n[2] Loading ALL user patterns...")
     user_patterns = loader.load_user_patterns(n_users=n_users)
     print(f"Loaded {len(user_patterns)} users")
 
@@ -294,9 +324,10 @@ def main():
     print("SS-DMFO GPU (Full Test)")
     print("=" * 70)
 
+    n_loaded = len(user_patterns)
     config = GPUConfig(
         max_iter=150,                      # More iterations
-        gpu_batch_size=500,
+        gpu_batch_size=2000,               # Larger batch for 24GB GPU
         lr_alpha=0.15,
         lr_beta=0.08,
         mfvi_iter=3,
@@ -313,6 +344,7 @@ def main():
         phase1_ratio=0.15,                 # 15% for spatial only
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
+    print(f"GPU batch size: {config.gpu_batch_size}, num batches: {(n_loaded + config.gpu_batch_size - 1) // config.gpu_batch_size}")
 
     gpu_method = SSDMFOv3GPU(config)
     gpu_start = time.time()
@@ -336,12 +368,17 @@ def main():
     calculator.print_metrics(gpu_metrics, phase=2)
     print(f"GPU time: {time.time() - gpu_start:.1f}s")
 
-    # Compute H-W distances for GPU
+    # Compute H-W distances
+    print("Computing H-W distances...")
     hw_dist_gpu = compute_hw_distances(gpu_result, user_patterns,
                                        constraints.grid_h, constraints.grid_w)
-
-    # Real H-W distances
     hw_dist_real = compute_real_hw_distances(constraints)
+
+    # Compute unique activity locations
+    print("Computing unique activity locations...")
+    unique_locs_gpu = compute_unique_locations(gpu_result, user_patterns)
+    unique_locs_ipf = compute_unique_locations(ipf_result, user_patterns)
+    unique_locs_real = compute_real_unique_locations(constraints, user_patterns)
 
     # =====================================
     # Summary
@@ -354,6 +391,15 @@ def main():
     print(f"{'IPF':<15} {ipf_metrics['jsd_mean']:<12.6f} {ipf_metrics.get('jsd_interaction_mean', 0):<12.4f} {time.time()-ipf_start:<10.1f}")
     print(f"{'SS-DMFO GPU':<15} {gpu_metrics['jsd_mean']:<12.6f} {gpu_metrics.get('jsd_interaction_mean', 0):<12.4f} {time.time()-gpu_start:<10.1f}")
 
+    print(f"\nH-W Distance (mean):")
+    print(f"  Real: {np.mean(hw_dist_real):.1f} km")
+    print(f"  GPU:  {np.mean(hw_dist_gpu):.1f} km")
+
+    print(f"\nUnique Locations (mean):")
+    print(f"  Real: {np.mean(unique_locs_real):.1f}")
+    print(f"  GPU:  {np.mean(unique_locs_gpu):.1f}")
+    print(f"  IPF:  {np.mean(unique_locs_ipf):.1f}")
+
     # =====================================
     # Visualization
     # =====================================
@@ -361,6 +407,7 @@ def main():
     visualize_results(
         constraints, gpu_spatial, gpu_interaction,
         hw_dist_gpu, hw_dist_real,
+        unique_locs_gpu, unique_locs_real,
         save_path='ssdmfo_results.png'
     )
 
@@ -368,6 +415,7 @@ def main():
     visualize_results(
         constraints, ipf_spatial, ipf_interaction,
         hw_dist_ipf, hw_dist_real,
+        unique_locs_ipf, unique_locs_real,
         save_path='ipf_results.png'
     )
 

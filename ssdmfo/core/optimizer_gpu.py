@@ -38,8 +38,8 @@ class GPUConfig:
     """Configuration for GPU-accelerated SS-DMFO"""
     # Optimization
     max_iter: int = 100
-    lr_alpha: float = 0.1
-    lr_beta: float = 0.01
+    lr_alpha: float = 0.15          # Increased for faster spatial convergence
+    lr_beta: float = 0.05           # Increased for better interaction optimization
     tolerance: float = 1e-4
 
     # MFVI
@@ -48,12 +48,12 @@ class GPUConfig:
 
     # Temperature annealing
     temp_init: float = 2.0
-    temp_final: float = 1.0
+    temp_final: float = 0.3         # Lower for sharper final distributions
 
     # Gumbel noise
     gumbel_scale: float = 0.3
-    gumbel_decay: float = 0.995
-    gumbel_final: float = 0.05
+    gumbel_decay: float = 0.99      # Faster decay
+    gumbel_final: float = 0.01      # Lower floor for precise convergence
 
     # Batch size for GPU processing (to avoid OOM)
     # Adjust based on GPU memory: 500 for 8GB, 1000 for 16GB, 2000 for 24GB
@@ -63,12 +63,13 @@ class GPUConfig:
     log_freq: int = 5
 
     # Interaction
-    interaction_freq: int = 3
+    interaction_freq: int = 2       # More frequent interaction updates
     top_k: int = 50
 
     # Early stopping
-    early_stop_patience: int = 10
+    early_stop_patience: int = 15   # More patience for interaction improvement
     phase_separation: bool = True
+    phase1_ratio: float = 0.25      # Shorter phase 1 (was 1/3)
 
     # GPU settings
     device: str = 'cuda'  # 'cuda' or 'cpu'
@@ -320,10 +321,10 @@ class SSDMFOv3GPU(BaseMethod):
         no_improve_count = 0
         best_iter = 0
 
-        # Phase separation
-        phase1_iters = self.config.max_iter // 3 if self.config.phase_separation else 0
+        # Phase separation - use configurable ratio
+        phase1_iters = int(self.config.max_iter * self.config.phase1_ratio) if self.config.phase_separation else 0
 
-        print(f"\n[SS-DMFO GPU] Starting optimization (max_iter={self.config.max_iter})...")
+        print(f"\n[SS-DMFO GPU] Starting optimization (max_iter={self.config.max_iter}, phase1={phase1_iters})...")
 
         for iteration in range(self.config.max_iter):
             iter_start = time.time()
@@ -354,7 +355,13 @@ class SSDMFOv3GPU(BaseMethod):
             gen_W = torch.zeros(grid_size, device=self.device, dtype=self.dtype)
             gen_O = torch.zeros(grid_size, device=self.device, dtype=self.dtype)
 
-            all_Q_cpu = []  # Store Q for interaction computation
+            # Determine if we need interaction this iteration
+            compute_interaction = (constraints.interaction is not None and
+                                   not in_phase1 and
+                                   iteration % self.config.interaction_freq == 0)
+
+            # Store Q tensors for GPU interaction computation
+            all_Q_gpu = [] if compute_interaction else None
 
             for batch_idx, user_data in enumerate(user_data_batches):
                 Q = self._batch_forward_gpu(
@@ -368,13 +375,12 @@ class SSDMFOv3GPU(BaseMethod):
                 gen_W += batch_W
                 gen_O += batch_O
 
-                # Store Q for interaction (only when needed)
-                if constraints.interaction is not None and not in_phase1 and iteration % self.config.interaction_freq == 0:
-                    all_Q_cpu.append((user_data, Q.cpu().numpy()))
-
-                # Free GPU memory
-                del Q
-                torch.cuda.empty_cache()
+                # Keep Q on GPU for interaction computation
+                if compute_interaction:
+                    all_Q_gpu.append((user_data, Q))
+                else:
+                    del Q
+                    torch.cuda.empty_cache()
 
             # Normalize
             gen_H = gen_H / (gen_H.sum() + 1e-10)
@@ -389,17 +395,32 @@ class SSDMFOv3GPU(BaseMethod):
             grad_W = -(gen_W - target_W)
             grad_O = -(gen_O - target_O)
 
-            alpha_lr = self.config.lr_alpha if in_phase1 else self.config.lr_alpha * 0.5
+            # Keep learning rate high throughout - Adam handles adaptation
+            alpha_lr = self.config.lr_alpha
             optimizer.step(grad_H, grad_W, grad_O, alpha_lr)
 
             # ============================================
-            # INTERACTION (less frequent)
+            # INTERACTION (GPU-accelerated)
             # ============================================
             interaction_loss = 0.0
-            if all_Q_cpu:  # Only compute if we collected Q
-                interaction_loss, gen_interaction = self._compute_interaction_cpu_batched(
-                    all_Q_cpu, user_patterns, grid_size, constraints.interaction
-                )
+            gen_interaction = None
+            if all_Q_gpu:
+                # Compute interaction using GPU for each batch
+                all_interactions = []
+                for user_data, Q in all_Q_gpu:
+                    loss, interaction = self._compute_interaction_gpu(
+                        Q, user_data, grid_size, constraints.interaction
+                    )
+                    all_interactions.append((loss, interaction))
+                    del Q
+
+                torch.cuda.empty_cache()
+
+                # Average interaction loss across batches
+                if all_interactions:
+                    interaction_loss = np.mean([x[0] for x in all_interactions])
+                    # Merge sparse matrices from all batches
+                    gen_interaction = self._merge_interactions([x[1] for x in all_interactions], grid_size)
 
                 # Early stopping
                 if interaction_loss < best_interaction_loss - 0.001:
@@ -606,6 +627,93 @@ class SSDMFOv3GPU(BaseMethod):
         jsd_O = jsd(gen_O, target_O)
 
         return ((jsd_H + jsd_W + jsd_O) / 3).item()
+
+    def _compute_interaction_gpu(self,
+                                 Q: torch.Tensor,
+                                 user_data: BatchedUserData,
+                                 grid_size: int,
+                                 real_interaction: InteractionConstraints) -> Tuple[float, 'InteractionConstraints']:
+        """GPU-accelerated interaction computation using batched outer products"""
+        top_k = self.config.top_k
+        n_users = user_data.n_users
+
+        # Aggregate Q by type for each user: (n_users, grid_size)
+        H_agg = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
+        W_agg = (Q * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+        O_agg = (Q * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+
+        # Normalize per user
+        H_agg = H_agg / (H_agg.sum(dim=1, keepdim=True) + 1e-10)
+        W_agg = W_agg / (W_agg.sum(dim=1, keepdim=True) + 1e-10)
+        O_agg = O_agg / (O_agg.sum(dim=1, keepdim=True) + 1e-10)
+
+        # Get top-k indices for efficiency
+        _, H_topk_idx = torch.topk(H_agg.sum(dim=0), min(top_k, grid_size))
+        _, W_topk_idx = torch.topk(W_agg.sum(dim=0), min(top_k, grid_size))
+        _, O_topk_idx = torch.topk(O_agg.sum(dim=0), min(top_k, grid_size))
+
+        # Extract top-k values
+        H_topk = H_agg[:, H_topk_idx]  # (n_users, top_k)
+        W_topk = W_agg[:, W_topk_idx]
+        O_topk = O_agg[:, O_topk_idx]
+
+        # Compute outer products for all users at once: (n_users, top_k, top_k)
+        HW_outer = torch.bmm(H_topk.unsqueeze(2), W_topk.unsqueeze(1))  # (n_users, top_k, top_k)
+        HO_outer = torch.bmm(H_topk.unsqueeze(2), O_topk.unsqueeze(1))
+        WO_outer = torch.bmm(W_topk.unsqueeze(2), O_topk.unsqueeze(1))
+
+        # Sum across users
+        HW_sum = HW_outer.sum(dim=0)  # (top_k, top_k)
+        HO_sum = HO_outer.sum(dim=0)
+        WO_sum = WO_outer.sum(dim=0)
+
+        # Convert to sparse matrices on CPU
+        HW_sum_np = HW_sum.cpu().numpy()
+        HO_sum_np = HO_sum.cpu().numpy()
+        WO_sum_np = WO_sum.cpu().numpy()
+
+        H_idx = H_topk_idx.cpu().numpy()
+        W_idx = W_topk_idx.cpu().numpy()
+        O_idx = O_topk_idx.cpu().numpy()
+
+        # Build sparse matrices with proper indices
+        def build_sparse(values, row_idx, col_idx):
+            rows, cols = np.meshgrid(row_idx, col_idx, indexing='ij')
+            mask = values > 1e-15
+            if not np.any(mask):
+                return sparse.csr_matrix((grid_size, grid_size))
+            return sparse.csr_matrix(
+                (values[mask], (rows[mask], cols[mask])),
+                shape=(grid_size, grid_size)
+            )
+
+        HW = build_sparse(HW_sum_np, H_idx, W_idx)
+        HO = build_sparse(HO_sum_np, H_idx, O_idx)
+        WO = build_sparse(WO_sum_np, W_idx, O_idx)
+
+        gen_interaction = InteractionConstraints(HW=HW, HO=HO, WO=WO)
+        gen_interaction.normalize()
+
+        # Compute JSD
+        loss = self._interaction_jsd_cpu(gen_interaction, real_interaction)
+
+        return loss, gen_interaction
+
+    def _merge_interactions(self,
+                            interactions: List[InteractionConstraints],
+                            grid_size: int) -> InteractionConstraints:
+        """Merge interaction constraints from multiple batches"""
+        if len(interactions) == 1:
+            return interactions[0]
+
+        # Sum sparse matrices
+        HW = sum(x.HW for x in interactions)
+        HO = sum(x.HO for x in interactions)
+        WO = sum(x.WO for x in interactions)
+
+        merged = InteractionConstraints(HW=HW, HO=HO, WO=WO)
+        merged.normalize()
+        return merged
 
     def _compute_interaction_cpu_batched(self,
                                          all_Q_cpu: List[Tuple[BatchedUserData, np.ndarray]],

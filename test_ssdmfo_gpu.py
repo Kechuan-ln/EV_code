@@ -122,19 +122,22 @@ def main():
         print("=" * 70)
 
         config = GPUConfig(
-            max_iter=60,
+            max_iter=80,                       # More iterations for interaction
             gpu_batch_size=min(n_users, 500),  # Batch size for GPU (avoid OOM)
+            lr_alpha=0.15,                     # Faster spatial convergence
+            lr_beta=0.05,                      # Aggressive beta updates
             mfvi_iter=3,
             temp_init=2.0,
-            temp_final=1.0,
+            temp_final=0.3,                    # Lower for sharper distributions
             gumbel_scale=0.3,
-            gumbel_decay=0.995,
-            gumbel_final=0.05,
-            interaction_freq=3,
+            gumbel_decay=0.99,                 # Faster decay
+            gumbel_final=0.01,                 # Lower noise floor
+            interaction_freq=2,                # More frequent interaction updates
             top_k=50,
             log_freq=5,
-            early_stop_patience=8,
+            early_stop_patience=15,            # More patience
             phase_separation=True,
+            phase1_ratio=0.25,                 # Shorter phase 1
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
 

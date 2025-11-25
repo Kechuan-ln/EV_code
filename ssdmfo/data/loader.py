@@ -135,7 +135,7 @@ class ConstraintDataLoader:
         return sorted(locations, key=lambda x: (x.type, x.index))
 
     def load_interaction_constraints(self) -> InteractionConstraints:
-        """加载二阶交互约束 π_cc'^real"""
+        """加载二阶交互约束 π_cc'^real (向量化版本)"""
         print("Loading interaction constraints...")
 
         # 获取栅格映射（需要先加载空间约束）
@@ -148,36 +148,51 @@ class ConstraintDataLoader:
         grid_w = len(lon_to_idx)
         grid_size = grid_h * grid_w
 
+        # 预计算映射数组以支持向量化
+        lon_min = min(lon_to_idx.keys())
+        lon_max = max(lon_to_idx.keys())
+        lat_min = min(lat_to_idx.keys())
+        lat_max = max(lat_to_idx.keys())
+
         def load_interaction_matrix(filename: str, col1_prefix: str, col2_prefix: str):
-            """加载单个交互矩阵"""
+            """加载单个交互矩阵 (向量化)"""
             filepath = self.data_dir / f'data/anchor_points/{filename}'
+            print(f"    Loading {filename}...")
             df = pd.read_csv(filepath)
 
-            rows, cols, data = [], [], []
+            # 提取列
+            lon1 = df[f'{col1_prefix}loncol'].values
+            lat1 = df[f'{col1_prefix}latcol'].values
+            lon2 = df[f'{col2_prefix}loncol'].values
+            lat2 = df[f'{col2_prefix}latcol'].values
+            counts = df['count'].values
 
-            for _, row in df.iterrows():
-                # 第一个地点的坐标
-                lon1 = row[f'{col1_prefix}loncol']
-                lat1 = row[f'{col1_prefix}latcol']
-                # 第二个地点的坐标
-                lon2 = row[f'{col2_prefix}loncol']
-                lat2 = row[f'{col2_prefix}latcol']
-                count = row['count']
+            # 过滤在范围内的行
+            mask = (
+                (lon1 >= lon_min) & (lon1 <= lon_max) &
+                (lat1 >= lat_min) & (lat1 <= lat_max) &
+                (lon2 >= lon_min) & (lon2 <= lon_max) &
+                (lat2 >= lat_min) & (lat2 <= lat_max)
+            )
 
-                # 检查是否在栅格范围内
-                if (lon1 in lon_to_idx and lat1 in lat_to_idx and
-                    lon2 in lon_to_idx and lat2 in lat_to_idx):
+            lon1 = lon1[mask]
+            lat1 = lat1[mask]
+            lon2 = lon2[mask]
+            lat2 = lat2[mask]
+            counts = counts[mask]
 
-                    # 转换为线性索引
-                    idx1 = lat_to_idx[lat1] * grid_w + lon_to_idx[lon1]
-                    idx2 = lat_to_idx[lat2] * grid_w + lon_to_idx[lon2]
+            # 向量化转换为索引
+            lat_idx1 = lat1 - lat_min
+            lon_idx1 = lon1 - lon_min
+            lat_idx2 = lat2 - lat_min
+            lon_idx2 = lon2 - lon_min
 
-                    rows.append(idx1)
-                    cols.append(idx2)
-                    data.append(count)
+            # 线性索引
+            idx1 = lat_idx1 * grid_w + lon_idx1
+            idx2 = lat_idx2 * grid_w + lon_idx2
 
             matrix = sparse.csr_matrix(
-                (data, (rows, cols)), shape=(grid_size, grid_size)
+                (counts, (idx1, idx2)), shape=(grid_size, grid_size)
             )
             return matrix
 

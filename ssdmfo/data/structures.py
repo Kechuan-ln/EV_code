@@ -129,55 +129,84 @@ class Result:
         return SpatialConstraints(H=H_map, W=W_map, O=O_map)
 
     def compute_interaction_stats(self, user_patterns: Dict[int, UserPattern],
-                                  grid_h: int, grid_w: int) -> InteractionConstraints:
-        """从分配计算交互统计（二阶联合分布） - Optimized
-        
-        使用矩阵乘法代替嵌套循环以加速计算。
-        原理: sum(outer(v1, v2)) = V1.T @ V2
+                                  grid_h: int, grid_w: int,
+                                  top_k: int = 50) -> InteractionConstraints:
+        """从分配计算交互统计（二阶联合分布）
+
+        使用top-k截断策略：只保留每个分配中概率最高的k个位置
+        这样避免了O(grid_size^2)的内存和计算开销
+
+        Args:
+            top_k: 每个分配保留的位置数（默认50，内存需求约50×50×用户数×20对）
         """
         grid_size = grid_h * grid_w
-        
-        def compute_matrix(type1, type2, batch_size=1000):
-            # 预分配累加矩阵 (使用float32节省内存)
-            # 注意: 40000x40000 float32 约占 6.4GB 内存
-            total_matrix = np.zeros((grid_size, grid_size), dtype=np.float32)
-            
-            # 收集所有需要计算的对
-            pairs = []
-            for user_id, alloc in self.allocations.items():
-                pattern = user_patterns[user_id]
-                indices1 = [i for i, loc in enumerate(pattern.locations) if loc.type == type1]
-                indices2 = [i for i, loc in enumerate(pattern.locations) if loc.type == type2]
-                
-                for i1 in indices1:
-                    for i2 in indices2:
-                        pairs.append((alloc[i1], alloc[i2]))
-            
-            # 分批处理以控制中间变量内存
-            for i in range(0, len(pairs), batch_size):
-                batch = pairs[i:i + batch_size]
-                if not batch:
-                    continue
-                    
-                # 堆叠批次数据
-                # vec1: (batch, grid), vec2: (batch, grid)
-                vecs1 = np.stack([p[0] for p in batch]).astype(np.float32)
-                vecs2 = np.stack([p[1] for p in batch]).astype(np.float32)
-                
-                # 矩阵乘法累加: (Grid, Batch) @ (Batch, Grid) -> (Grid, Grid)
-                # 这等价于对batch中每一对向量做外积然后求和
-                total_matrix += np.dot(vecs1.T, vecs2)
-                
-            # 阈值处理保持稀疏性 (匹配原逻辑)
-            total_matrix[total_matrix < 1e-15] = 0
-            
-            return sparse.csr_matrix(total_matrix)
 
-        print("  Computing HW interaction (Vectorized)...")
-        HW = compute_matrix('H', 'W')
-        print("  Computing HO interaction (Vectorized)...")
-        HO = compute_matrix('H', 'O')
-        print("  Computing WO interaction (Vectorized)...")
-        WO = compute_matrix('W', 'O')
+        # 使用字典累积稀疏结果
+        hw_dict = {}
+        ho_dict = {}
+        wo_dict = {}
+
+        def get_top_k(probs, k):
+            """获取概率最高的k个位置"""
+            if k >= len(probs):
+                indices = np.where(probs > 1e-10)[0]
+                return indices, probs[indices]
+            # argpartition比argsort快
+            top_idx = np.argpartition(probs, -k)[-k:]
+            top_probs = probs[top_idx]
+            # 过滤极小值
+            mask = top_probs > 1e-10
+            return top_idx[mask], top_probs[mask]
+
+        def accumulate_outer(d, indices1, probs1, indices2, probs2):
+            """累积外积到字典"""
+            for i, idx1 in enumerate(indices1):
+                p1 = probs1[i]
+                for j, idx2 in enumerate(indices2):
+                    val = p1 * probs2[j]
+                    if val > 1e-15:
+                        key = (int(idx1), int(idx2))
+                        d[key] = d.get(key, 0.0) + val
+
+        n_users = len(self.allocations)
+        for i, (user_id, alloc) in enumerate(self.allocations.items()):
+            if (i + 1) % 100 == 0:
+                print(f"    Processing user {i+1}/{n_users}...")
+
+            pattern = user_patterns[user_id]
+
+            # 按类型分组并预计算top-k
+            h_data = [(idx, *get_top_k(alloc[idx], top_k))
+                      for idx, loc in enumerate(pattern.locations) if loc.type == 'H']
+            w_data = [(idx, *get_top_k(alloc[idx], top_k))
+                      for idx, loc in enumerate(pattern.locations) if loc.type == 'W']
+            o_data = [(idx, *get_top_k(alloc[idx], top_k))
+                      for idx, loc in enumerate(pattern.locations) if loc.type == 'O']
+
+            # HW交互
+            for _, h_indices, h_probs in h_data:
+                for _, w_indices, w_probs in w_data:
+                    accumulate_outer(hw_dict, h_indices, h_probs, w_indices, w_probs)
+
+            # HO交互
+            for _, h_indices, h_probs in h_data:
+                for _, o_indices, o_probs in o_data:
+                    accumulate_outer(ho_dict, h_indices, h_probs, o_indices, o_probs)
+
+            # WO交互
+            for _, w_indices, w_probs in w_data:
+                for _, o_indices, o_probs in o_data:
+                    accumulate_outer(wo_dict, w_indices, w_probs, o_indices, o_probs)
+
+        def dict_to_sparse(d):
+            if not d:
+                return sparse.csr_matrix((grid_size, grid_size))
+            rows, cols, data = zip(*[(k[0], k[1], v) for k, v in d.items()])
+            return sparse.csr_matrix((data, (rows, cols)), shape=(grid_size, grid_size))
+
+        print(f"  Building sparse matrices (HW:{len(hw_dict)}, HO:{len(ho_dict)}, WO:{len(wo_dict)} entries)...")
+        HW = dict_to_sparse(hw_dict)
+        HO = dict_to_sparse(ho_dict)
+        WO = dict_to_sparse(wo_dict)
 
         return InteractionConstraints(HW=HW, HO=HO, WO=WO)

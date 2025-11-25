@@ -3,6 +3,7 @@
 
 import sys
 import os
+import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
@@ -18,6 +19,8 @@ def main():
     print("PHASE 2 TEST - Spatial + Interaction Constraints")
     print("=" * 70)
 
+    total_start = time.time()
+
     # Step 1: 加载数据
     print("\n[Step 1] Loading data...")
     loader = ConstraintDataLoader(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting'))
@@ -28,10 +31,11 @@ def main():
     print(f"  HW: {constraints.interaction.HW.nnz} non-zero entries")
     print(f"  HO: {constraints.interaction.HO.nnz} non-zero entries")
     print(f"  WO: {constraints.interaction.WO.nnz} non-zero entries")
+    print(f"Data loading time: {time.time() - total_start:.1f}s")
 
     # Step 2: 加载用户
     print("\n[Step 2] Loading user patterns...")
-    n_users = 100  # 先用小规模测试
+    n_users = 50  # 使用较小规模测试
     user_patterns = loader.load_user_patterns(n_users=n_users)
     print(f"Loaded {len(user_patterns)} users")
 
@@ -58,10 +62,11 @@ def main():
         )
         generated_spatial.normalize()
 
-        # 计算交互统计
-        print("Computing interaction statistics...")
+        # 计算交互统计 (使用top_k=30加速)
+        print("Computing interaction statistics (top_k=30)...")
         generated_interaction = result.compute_interaction_stats(
-            user_patterns, constraints.grid_h, constraints.grid_w
+            user_patterns, constraints.grid_h, constraints.grid_w,
+            top_k=30
         )
         generated_interaction.normalize()
 
@@ -116,6 +121,8 @@ def main():
         print("\n>>> Interaction JSD is also low - need to investigate further.")
     else:
         print(f"\n>>> Interaction constraint adds real difficulty (JSD={ipf_interact:.4f})")
+
+    print(f"\nTotal execution time: {time.time() - total_start:.1f}s")
 
 
 if __name__ == '__main__':

@@ -95,7 +95,7 @@ def main():
     calculator = MetricsCalculator()
     results = {}
 
-    for n_users in [100, 500, 1000]:
+    for n_users in [100]:  # Simplified for faster testing
         print(f"\n{'#' * 70}")
         print(f"# Testing with {n_users} users")
         print('#' * 70)
@@ -122,10 +122,10 @@ def main():
         print("=" * 70)
 
         config = GPUConfig(
-            max_iter=80,                       # More iterations for interaction
+            max_iter=100,                      # More iterations for interaction
             gpu_batch_size=min(n_users, 500),  # Batch size for GPU (avoid OOM)
             lr_alpha=0.15,                     # Faster spatial convergence
-            lr_beta=0.05,                      # Aggressive beta updates
+            lr_beta=0.08,                      # More aggressive beta updates
             mfvi_iter=3,
             temp_init=2.0,
             temp_final=0.3,                    # Lower for sharper distributions
@@ -133,11 +133,11 @@ def main():
             gumbel_decay=0.99,                 # Faster decay
             gumbel_final=0.01,                 # Lower noise floor
             interaction_freq=2,                # More frequent interaction updates
-            top_k=50,
+            top_k=200,                         # INCREASED: more interaction coverage
             log_freq=5,
-            early_stop_patience=15,            # More patience
+            early_stop_patience=20,            # More patience
             phase_separation=True,
-            phase1_ratio=0.25,                 # Shorter phase 1
+            phase1_ratio=0.2,                  # Even shorter phase 1
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
 

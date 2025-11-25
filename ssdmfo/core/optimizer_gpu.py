@@ -64,7 +64,7 @@ class GPUConfig:
 
     # Interaction
     interaction_freq: int = 2       # More frequent interaction updates
-    top_k: int = 50
+    top_k: int = 200                # Increased for better interaction coverage
 
     # Early stopping
     early_stop_patience: int = 15   # More patience for interaction improvement
@@ -317,6 +317,7 @@ class SSDMFOv3GPU(BaseMethod):
 
         # Early stopping
         best_interaction_loss = float('inf')
+        last_interaction_loss = 0.0  # Track last computed interaction for display
         best_state = None
         no_improve_count = 0
         best_iter = 0
@@ -402,7 +403,6 @@ class SSDMFOv3GPU(BaseMethod):
             # ============================================
             # INTERACTION (GPU-accelerated)
             # ============================================
-            interaction_loss = 0.0
             gen_interaction = None
             if all_Q_gpu:
                 # Compute interaction using GPU for each batch
@@ -418,13 +418,13 @@ class SSDMFOv3GPU(BaseMethod):
 
                 # Average interaction loss across batches
                 if all_interactions:
-                    interaction_loss = np.mean([x[0] for x in all_interactions])
+                    last_interaction_loss = np.mean([x[0] for x in all_interactions])
                     # Merge sparse matrices from all batches
                     gen_interaction = self._merge_interactions([x[1] for x in all_interactions], grid_size)
 
                 # Early stopping
-                if interaction_loss < best_interaction_loss - 0.001:
-                    best_interaction_loss = interaction_loss
+                if last_interaction_loss < best_interaction_loss - 0.001:
+                    best_interaction_loss = last_interaction_loss
                     best_state = potentials.copy_state()
                     no_improve_count = 0
                     best_iter = iteration
@@ -440,8 +440,10 @@ class SSDMFOv3GPU(BaseMethod):
             iter_time = time.time() - iter_start
             phase_str = "P1" if in_phase1 else "P2"
             if iteration % self.config.log_freq == 0 or iteration < 5:
+                # Show last known interaction loss (not 0 when not computed)
+                interact_str = f"{last_interaction_loss:.4f}" if last_interaction_loss > 0 else "---"
                 print(f"  Iter {iteration:3d} [{phase_str}]: Spatial={spatial_loss:.4f}, "
-                      f"Interact={interaction_loss:.4f}, T={temperature:.2f}, "
+                      f"Interact={interact_str}, T={temperature:.2f}, "
                       f"Gumbel={gumbel_scale:.3f} ({iter_time:.1f}s)")
 
             # Early stopping
@@ -847,25 +849,51 @@ class SSDMFOv3GPU(BaseMethod):
         cols.extend(j_mesh[mask].tolist())
 
     def _interaction_jsd_cpu(self, gen, real) -> float:
-        """Compute interaction JSD on CPU"""
-        def sparse_jsd(p, q):
+        """Compute interaction JSD on CPU - optimized with sampling"""
+        def sparse_jsd_fast(p, q, n_samples=5000):
+            """Fast JSD using sampling from both distributions"""
             p_coo = p.tocoo()
             q_coo = q.tocoo()
+
             if p_coo.nnz == 0 and q_coo.nnz == 0:
                 return 0.0
 
-            p_idx = set(zip(p_coo.row.tolist(), p_coo.col.tolist()))
-            q_idx = set(zip(q_coo.row.tolist(), q_coo.col.tolist()))
-            all_idx = list(p_idx | q_idx)
+            # Sample from generated distribution (smaller, so sample all if small)
+            if p_coo.nnz <= n_samples:
+                p_rows, p_cols, p_data = p_coo.row, p_coo.col, p_coo.data
+            else:
+                idx = np.random.choice(p_coo.nnz, n_samples, replace=False)
+                p_rows, p_cols, p_data = p_coo.row[idx], p_coo.col[idx], p_coo.data[idx]
 
-            if len(all_idx) > 10000:
-                all_idx = [all_idx[i] for i in np.random.choice(len(all_idx), 10000, replace=False)]
+            # Sample from real distribution
+            if q_coo.nnz <= n_samples:
+                q_rows, q_cols, q_data = q_coo.row, q_coo.col, q_coo.data
+            else:
+                idx = np.random.choice(q_coo.nnz, n_samples, replace=False)
+                q_rows, q_cols, q_data = q_coo.row[idx], q_coo.col[idx], q_coo.data[idx]
 
-            if not all_idx:
+            # Combine indices using numpy (faster than Python sets)
+            p_keys = p_rows * q.shape[1] + p_cols  # Flatten to 1D keys
+            q_keys = q_rows * q.shape[1] + q_cols
+
+            all_keys = np.unique(np.concatenate([p_keys, q_keys]))
+
+            if len(all_keys) == 0:
                 return 0.0
 
-            p_vals = np.array([p[r, c] for r, c in all_idx]) + 1e-10
-            q_vals = np.array([q[r, c] for r, c in all_idx]) + 1e-10
+            # Limit samples
+            if len(all_keys) > n_samples:
+                all_keys = np.random.choice(all_keys, n_samples, replace=False)
+
+            # Convert back to (row, col)
+            all_rows = all_keys // q.shape[1]
+            all_cols = all_keys % q.shape[1]
+
+            # Get values using sparse matrix indexing (vectorized)
+            p_vals = np.asarray(p[all_rows, all_cols]).flatten() + 1e-10
+            q_vals = np.asarray(q[all_rows, all_cols]).flatten() + 1e-10
+
+            # Normalize
             p_vals = p_vals / p_vals.sum()
             q_vals = q_vals / q_vals.sum()
             m = 0.5 * (p_vals + q_vals)
@@ -874,11 +902,11 @@ class SSDMFOv3GPU(BaseMethod):
 
         losses = []
         if gen.HW.nnz > 0 or real.HW.nnz > 0:
-            losses.append(sparse_jsd(gen.HW, real.HW))
+            losses.append(sparse_jsd_fast(gen.HW, real.HW))
         if gen.HO.nnz > 0 or real.HO.nnz > 0:
-            losses.append(sparse_jsd(gen.HO, real.HO))
+            losses.append(sparse_jsd_fast(gen.HO, real.HO))
         if gen.WO.nnz > 0 or real.WO.nnz > 0:
-            losses.append(sparse_jsd(gen.WO, real.WO))
+            losses.append(sparse_jsd_fast(gen.WO, real.WO))
 
         return np.mean(losses) if losses else 0.0
 

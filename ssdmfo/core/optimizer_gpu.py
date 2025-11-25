@@ -91,7 +91,6 @@ class GPUPotentials:
         self.alpha_O = torch.zeros(self.grid_size, device=device, dtype=dtype)
 
         # Second-order potentials (sparse, on GPU)
-        # Initialize as empty sparse tensors
         self.beta_HW = None
         self.beta_HO = None
         self.beta_WO = None
@@ -147,6 +146,61 @@ class GPUPotentials:
             self.beta_HO = state['beta_HO'].clone()
         if 'beta_WO' in state:
             self.beta_WO = state['beta_WO'].clone()
+
+
+class GPUAdamOptimizer:
+    """Adam optimizer for GPU potentials - matches CPU behavior"""
+
+    def __init__(self, potentials: GPUPotentials, beta1: float = 0.9, beta2: float = 0.999, eps: float = 1e-8):
+        self.potentials = potentials
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.t = 0
+
+        device = potentials.device
+        dtype = potentials.dtype
+        grid_size = potentials.grid_size
+
+        # First moment (momentum)
+        self.m = {
+            'H': torch.zeros(grid_size, device=device, dtype=dtype),
+            'W': torch.zeros(grid_size, device=device, dtype=dtype),
+            'O': torch.zeros(grid_size, device=device, dtype=dtype),
+        }
+
+        # Second moment (RMSprop)
+        self.v = {
+            'H': torch.zeros(grid_size, device=device, dtype=dtype),
+            'W': torch.zeros(grid_size, device=device, dtype=dtype),
+            'O': torch.zeros(grid_size, device=device, dtype=dtype),
+        }
+
+    def step(self, grad_H: torch.Tensor, grad_W: torch.Tensor, grad_O: torch.Tensor, lr: float):
+        """Execute one Adam update step"""
+        self.t += 1
+
+        for loc_type, grad in [('H', grad_H), ('W', grad_W), ('O', grad_O)]:
+            # Update first moment
+            self.m[loc_type] = self.beta1 * self.m[loc_type] + (1 - self.beta1) * grad
+
+            # Update second moment
+            self.v[loc_type] = self.beta2 * self.v[loc_type] + (1 - self.beta2) * grad ** 2
+
+            # Bias correction
+            m_hat = self.m[loc_type] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[loc_type] / (1 - self.beta2 ** self.t)
+
+            # Compute update
+            update = lr * m_hat / (torch.sqrt(v_hat) + self.eps)
+
+            # Apply update
+            if loc_type == 'H':
+                self.potentials.alpha_H -= update
+            elif loc_type == 'W':
+                self.potentials.alpha_W -= update
+            elif loc_type == 'O':
+                self.potentials.alpha_O -= update
 
 
 class BatchedUserData:
@@ -239,6 +293,9 @@ class SSDMFOv3GPU(BaseMethod):
         # Initialize potentials on GPU
         potentials = GPUPotentials(grid_h, grid_w, self.device, self.dtype)
 
+        # Initialize Adam optimizer (CRITICAL: matches CPU version behavior)
+        optimizer = GPUAdamOptimizer(potentials)
+
         # Preprocess user data - split into batches to avoid OOM
         print(f"[SS-DMFO GPU] Preprocessing user data...")
         gpu_batch_size = self.config.gpu_batch_size
@@ -327,15 +384,13 @@ class SSDMFOv3GPU(BaseMethod):
             # Compute spatial loss (JSD)
             spatial_loss = self._compute_jsd_gpu(gen_H, target_H, gen_W, target_W, gen_O, target_O)
 
-            # Compute gradients and update alpha
+            # Compute gradients and update alpha using Adam optimizer
             grad_H = -(gen_H - target_H)
             grad_W = -(gen_W - target_W)
             grad_O = -(gen_O - target_O)
 
             alpha_lr = self.config.lr_alpha if in_phase1 else self.config.lr_alpha * 0.5
-            potentials.alpha_H -= alpha_lr * grad_H
-            potentials.alpha_W -= alpha_lr * grad_W
-            potentials.alpha_O -= alpha_lr * grad_O
+            optimizer.step(grad_H, grad_W, grad_O, alpha_lr)
 
             # ============================================
             # INTERACTION (less frequent)

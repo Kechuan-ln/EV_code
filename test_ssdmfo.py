@@ -91,17 +91,27 @@ def main():
         constraints, user_patterns, calculator
     )
 
-    # 3. SS-DMFO Phase 1 (spatial only)
+    # 3. SS-DMFO Phase 1 (spatial only) - fixed gradient direction
     results["SSDMFO-P1"] = test_method(
         "SS-DMFO Phase 1",
-        SSDMFOOptimizer(phase=1, max_iter=50, lr=0.1, temperature=1.0),
+        SSDMFOOptimizer(phase=1, max_iter=100, lr=0.5, temperature=1.0, log_freq=20),
         constraints, user_patterns, calculator
     )
 
     # 4. SS-DMFO Phase 2 (spatial + interaction)
+    # - interaction_freq=10: compute interaction every 10 iters (faster)
+    # - lr_beta=0.01: learning rate for beta potentials
     results["SSDMFO-P2"] = test_method(
         "SS-DMFO Phase 2",
-        SSDMFOPhase2(max_iter=100, lr=0.05, temperature=0.5),
+        SSDMFOPhase2(
+            max_iter=50,
+            lr=0.5,
+            lr_beta=0.01,
+            temperature=1.0,
+            interaction_weight=0.5,
+            interaction_freq=10,
+            log_freq=10
+        ),
         constraints, user_patterns, calculator
     )
 

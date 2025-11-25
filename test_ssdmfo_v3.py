@@ -109,49 +109,62 @@ def main():
         constraints, user_patterns, calculator
     )
 
-    # 2. SS-DMFO 3.0 (fast preset for initial testing)
+    # 2. SS-DMFO 3.0 (fixed preset - with early stopping and phase separation)
     print("\n" + "=" * 70)
-    print("NEW: SS-DMFO 3.0 (Fast Preset)")
+    print("NEW: SS-DMFO 3.0 (Fixed - Early Stopping)")
     print("=" * 70)
 
-    config_fast = SSDMFO3Config(
-        max_iter=30,
+    # Key changes from v3.0:
+    # - Phase separation: first optimize spatial, then both
+    # - Higher temp_final (1.0) to maintain diversity
+    # - Slower gumbel_decay (0.995) with floor (0.05)
+    # - Early stopping when interaction stops improving
+    config_fixed = SSDMFO3Config(
+        max_iter=60,
         batch_size=50,
         mfvi_iter=3,
         temp_init=2.0,
-        temp_final=0.5,
-        gumbel_scale=0.2,
-        gumbel_decay=0.95,
-        interaction_freq=5,
+        temp_final=1.0,           # Higher to maintain diversity
+        gumbel_scale=0.3,
+        gumbel_decay=0.995,       # Slower decay
+        gumbel_final=0.05,        # Never go to 0
+        interaction_freq=3,       # More frequent beta updates
         top_k=50,
-        log_freq=5
+        log_freq=5,
+        early_stop_patience=8,    # Stop if no improvement
+        phase_separation=True     # Phase 1: spatial, Phase 2: both
     )
-    results["SSDMFO-v3-fast"], interactions["SSDMFO-v3-fast"] = test_method(
-        "SS-DMFO 3.0 (Fast)",
-        SSDMFOv3(config_fast),
+    results["SSDMFO-v3-fixed"], interactions["SSDMFO-v3-fixed"] = test_method(
+        "SS-DMFO 3.0 (Fixed)",
+        SSDMFOv3(config_fixed),
         constraints, user_patterns, calculator
     )
 
-    # 3. SS-DMFO 3.0 (default preset)
+    # 3. SS-DMFO 3.0 (aggressive beta - prioritize interaction)
     print("\n" + "=" * 70)
-    print("NEW: SS-DMFO 3.0 (Default Preset)")
+    print("NEW: SS-DMFO 3.0 (Aggressive Beta)")
     print("=" * 70)
 
-    config_default = SSDMFO3Config(
-        max_iter=50,
+    config_aggressive = SSDMFO3Config(
+        max_iter=80,
         batch_size=50,
         mfvi_iter=5,
+        lr_alpha=0.05,            # Lower alpha LR
+        lr_beta=0.05,             # Higher beta LR (was 0.01)
         temp_init=2.0,
-        temp_final=0.3,
-        gumbel_scale=0.3,
-        gumbel_decay=0.97,
-        interaction_freq=5,
+        temp_final=1.2,           # Even higher to keep diversity
+        gumbel_scale=0.4,         # More noise
+        gumbel_decay=0.998,       # Very slow decay
+        gumbel_final=0.1,         # Higher floor
+        interaction_freq=2,       # Update beta every 2 iters
         top_k=50,
-        log_freq=10
+        log_freq=5,
+        early_stop_patience=10,
+        phase_separation=True
     )
-    results["SSDMFO-v3"], interactions["SSDMFO-v3"] = test_method(
-        "SS-DMFO 3.0 (Default)",
-        SSDMFOv3(config_default),
+    results["SSDMFO-v3-agg"], interactions["SSDMFO-v3-agg"] = test_method(
+        "SS-DMFO 3.0 (Aggressive)",
+        SSDMFOv3(config_aggressive),
         constraints, user_patterns, calculator
     )
 
@@ -162,7 +175,7 @@ def main():
     print(f"\n{'Method':<20} {'Spatial':<10} {'Interact':<10} {'Total':<10} {'HW nnz':<10}")
     print("-" * 60)
 
-    for name in ["IPF-P1", "SSDMFO-v3-fast", "SSDMFO-v3"]:
+    for name in ["IPF-P1", "SSDMFO-v3-fixed", "SSDMFO-v3-agg"]:
         metrics = results[name]
         interact_nnz = interactions[name].HW.nnz
         spatial = metrics['jsd_mean']
@@ -176,31 +189,38 @@ def main():
     print("=" * 70)
 
     ipf_interact = results["IPF-P1"]['jsd_interaction_mean']
-    v3_interact = results["SSDMFO-v3"]['jsd_interaction_mean']
+
+    # Find best SS-DMFO variant
+    best_name = "SSDMFO-v3-fixed"
+    best_interact = results["SSDMFO-v3-fixed"]['jsd_interaction_mean']
+    for name in ["SSDMFO-v3-agg"]:
+        if results[name]['jsd_interaction_mean'] < best_interact:
+            best_interact = results[name]['jsd_interaction_mean']
+            best_name = name
 
     print(f"\nIPF Phase 1:")
     print(f"  Spatial JSD:     {results['IPF-P1']['jsd_mean']:.4f}")
     print(f"  Interaction JSD: {ipf_interact:.4f}")
     print(f"  HW entries:      {interactions['IPF-P1'].HW.nnz}")
 
-    print(f"\nSS-DMFO 3.0:")
-    print(f"  Spatial JSD:     {results['SSDMFO-v3']['jsd_mean']:.4f}")
-    print(f"  Interaction JSD: {v3_interact:.4f}")
-    print(f"  HW entries:      {interactions['SSDMFO-v3'].HW.nnz}")
+    print(f"\nBest SS-DMFO 3.0 ({best_name}):")
+    print(f"  Spatial JSD:     {results[best_name]['jsd_mean']:.4f}")
+    print(f"  Interaction JSD: {best_interact:.4f}")
+    print(f"  HW entries:      {interactions[best_name].HW.nnz}")
 
-    if v3_interact < ipf_interact:
-        improvement = (ipf_interact - v3_interact) / ipf_interact * 100
+    if best_interact < ipf_interact:
+        improvement = (ipf_interact - best_interact) / ipf_interact * 100
         print(f"\n>>> SS-DMFO 3.0 improves interaction by {improvement:.1f}%!")
     else:
         print(f"\n>>> SS-DMFO 3.0 needs further tuning.")
 
     # Check diversity improvement
     ipf_nnz = interactions['IPF-P1'].HW.nnz
-    v3_nnz = interactions['SSDMFO-v3'].HW.nnz
-    if v3_nnz > ipf_nnz:
-        print(f">>> Diversity improved: {ipf_nnz} -> {v3_nnz} HW entries ({v3_nnz/ipf_nnz:.1f}x)")
+    best_nnz = interactions[best_name].HW.nnz
+    if best_nnz > ipf_nnz:
+        print(f">>> Diversity improved: {ipf_nnz} -> {best_nnz} HW entries ({best_nnz/ipf_nnz:.1f}x)")
     else:
-        print(f">>> Diversity not improved: {ipf_nnz} -> {v3_nnz} HW entries")
+        print(f">>> Diversity not improved: {ipf_nnz} -> {best_nnz} HW entries")
 
     print(f"\nTotal execution time: {time.time() - total_start:.1f}s")
 

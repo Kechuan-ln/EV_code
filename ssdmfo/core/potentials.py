@@ -103,6 +103,33 @@ class DualPotentials:
         elif key == 'OW' and self.beta_WO is not None:
             self.beta_WO = self.beta_WO - lr * gradient
 
+    def copy_state(self) -> Dict:
+        """Copy current state for checkpointing (early stopping)"""
+        state = {
+            'alpha_H': self.alpha_H.copy(),
+            'alpha_W': self.alpha_W.copy(),
+            'alpha_O': self.alpha_O.copy(),
+        }
+        if self.beta_HW is not None:
+            state['beta_HW'] = self.beta_HW.copy()
+        if self.beta_HO is not None:
+            state['beta_HO'] = self.beta_HO.copy()
+        if self.beta_WO is not None:
+            state['beta_WO'] = self.beta_WO.copy()
+        return state
+
+    def restore_state(self, state: Dict):
+        """Restore state from checkpoint"""
+        self.alpha_H = state['alpha_H'].copy()
+        self.alpha_W = state['alpha_W'].copy()
+        self.alpha_O = state['alpha_O'].copy()
+        if 'beta_HW' in state:
+            self.beta_HW = state['beta_HW'].copy()
+        if 'beta_HO' in state:
+            self.beta_HO = state['beta_HO'].copy()
+        if 'beta_WO' in state:
+            self.beta_WO = state['beta_WO'].copy()
+
 
 class PotentialsWithMomentum:
     """Optimizer with momentum (Adam-like)"""

@@ -38,14 +38,15 @@ class SSDMFO3Config:
     mfvi_iter: int = 5          # Iterations for MFVI convergence
     mfvi_damping: float = 0.5   # Damping factor
 
-    # Temperature annealing
+    # Temperature annealing (SLOWER decay to prevent rebound)
     temp_init: float = 2.0      # High temperature (exploration)
-    temp_final: float = 0.5     # Low temperature (exploitation)
+    temp_final: float = 1.0     # Higher final temp to maintain diversity
     temp_decay: str = 'exponential'  # 'linear' or 'exponential'
 
-    # Gumbel noise
+    # Gumbel noise (maintain diversity)
     gumbel_scale: float = 0.1   # Scale of Gumbel noise
-    gumbel_decay: float = 0.99  # Decay per iteration
+    gumbel_decay: float = 0.995 # SLOWER decay to maintain diversity
+    gumbel_final: float = 0.05  # Minimum Gumbel scale (never go to 0)
 
     # Stochastic optimization
     batch_size: int = 50        # Users per batch
@@ -56,6 +57,10 @@ class SSDMFO3Config:
     # Interaction
     interaction_freq: int = 5   # Compute interaction every N iters
     top_k: int = 50             # Top-k for interaction (increased from 30)
+
+    # Early stopping for interaction
+    early_stop_patience: int = 10  # Stop if no improvement for N interaction checks
+    phase_separation: bool = True  # Phase 1: spatial only, Phase 2: both
 
 
 class MeanFieldSolverV3:
@@ -222,7 +227,8 @@ class SSDMFOv3(BaseMethod):
         print(f"  Batch size: {self.config.batch_size}")
         print(f"  MFVI iterations: {self.config.mfvi_iter}")
         print(f"  Temperature: {self.config.temp_init} -> {self.config.temp_final}")
-        print(f"  Gumbel scale: {self.config.gumbel_scale}")
+        print(f"  Gumbel scale: {self.config.gumbel_scale} -> {self.config.gumbel_final}")
+        print(f"  Phase separation: {self.config.phase_separation}")
 
         potentials = DualPotentials.initialize(grid_h, grid_w, phase=2)
         optimizer = PotentialsWithMomentum(potentials)
@@ -231,27 +237,46 @@ class SSDMFOv3(BaseMethod):
         user_ids = list(user_patterns.keys())
         n_batches = (n_users + self.config.batch_size - 1) // self.config.batch_size
 
+        # Early stopping tracking
+        best_interaction_loss = float('inf')
+        best_potentials_state = None
+        no_improve_count = 0
+        best_iter = 0
+
         # Optimization loop
         print(f"\n[SS-DMFO 3.0] Starting optimization (max_iter={self.config.max_iter})...")
         prev_loss = float('inf')
         gumbel_scale = self.config.gumbel_scale
 
+        # Determine phase transition point
+        phase1_iters = self.config.max_iter // 3 if self.config.phase_separation else 0
+
         for iteration in range(self.config.max_iter):
             iter_start = time.time()
 
-            # Temperature annealing
-            if self.config.temp_decay == 'exponential':
-                progress = iteration / max(self.config.max_iter - 1, 1)
+            # Phase separation: Phase 1 = spatial only, Phase 2 = both
+            in_phase1 = self.config.phase_separation and iteration < phase1_iters
+            use_beta = not in_phase1 and iteration >= 5
+
+            # Temperature annealing (SLOWER - only start after phase1)
+            if in_phase1:
+                temperature = self.config.temp_init
+            elif self.config.temp_decay == 'exponential':
+                phase2_progress = (iteration - phase1_iters) / max(self.config.max_iter - phase1_iters - 1, 1)
                 temperature = self.config.temp_init * (
                     self.config.temp_final / self.config.temp_init
-                ) ** progress
+                ) ** phase2_progress
             else:  # linear
+                phase2_progress = (iteration - phase1_iters) / max(self.config.max_iter - phase1_iters - 1, 1)
                 temperature = self.config.temp_init - (
                     self.config.temp_init - self.config.temp_final
-                ) * iteration / max(self.config.max_iter - 1, 1)
+                ) * phase2_progress
 
-            # Gumbel noise decay
-            gumbel_scale = self.config.gumbel_scale * (self.config.gumbel_decay ** iteration)
+            # Gumbel noise decay (with minimum floor)
+            gumbel_scale = max(
+                self.config.gumbel_final,
+                self.config.gumbel_scale * (self.config.gumbel_decay ** iteration)
+            )
 
             # Shuffle users for stochastic optimization
             np.random.shuffle(user_ids)
@@ -265,7 +290,6 @@ class SSDMFOv3(BaseMethod):
 
             # Process users in batches
             all_responses = {}
-            use_beta = (iteration >= 5)  # Start using beta after warmup
 
             for batch_idx in range(n_batches):
                 start_idx = batch_idx * self.config.batch_size
@@ -309,15 +333,24 @@ class SSDMFOv3(BaseMethod):
             # Compute spatial loss
             spatial_loss = self._compute_jsd(gen_spatial, constraints.spatial)
 
-            # Compute interaction (less frequently)
+            # Compute interaction (less frequently, and only in phase 2)
             interaction_loss = 0.0
-            if constraints.interaction is not None and iteration % self.config.interaction_freq == 0:
+            if constraints.interaction is not None and not in_phase1 and iteration % self.config.interaction_freq == 0:
                 gen_interaction = self._aggregate_interaction_fast(
                     all_responses, user_patterns, grid_size
                 )
                 interaction_loss = self._compute_interaction_jsd(
                     gen_interaction, constraints.interaction
                 )
+
+                # Early stopping: track best interaction state
+                if interaction_loss < best_interaction_loss - 0.001:
+                    best_interaction_loss = interaction_loss
+                    best_potentials_state = potentials.copy_state()
+                    no_improve_count = 0
+                    best_iter = iteration
+                else:
+                    no_improve_count += 1
 
                 # Update beta potentials
                 if use_beta:
@@ -326,15 +359,25 @@ class SSDMFOv3(BaseMethod):
 
             total_loss = spatial_loss + 0.5 * interaction_loss
 
-            # Update alpha potentials
-            optimizer.step(spatial_grads, self.config.lr_alpha)
+            # Update alpha potentials (reduce learning rate in phase 2)
+            alpha_lr = self.config.lr_alpha if in_phase1 else self.config.lr_alpha * 0.5
+            optimizer.step(spatial_grads, alpha_lr)
 
             # Logging
             iter_time = time.time() - iter_start
+            phase_str = "P1" if in_phase1 else "P2"
             if iteration % self.config.log_freq == 0 or iteration < 5:
-                print(f"  Iter {iteration:3d}: Spatial={spatial_loss:.4f}, "
+                print(f"  Iter {iteration:3d} [{phase_str}]: Spatial={spatial_loss:.4f}, "
                       f"Interact={interaction_loss:.4f}, T={temperature:.2f}, "
                       f"Gumbel={gumbel_scale:.3f} ({iter_time:.1f}s)")
+
+            # Early stopping for interaction (only in phase 2)
+            if not in_phase1 and no_improve_count >= self.config.early_stop_patience:
+                print(f"  Early stopping: no interaction improvement for {no_improve_count} checks")
+                print(f"  Restoring best state from iter {best_iter} (interact={best_interaction_loss:.4f})")
+                if best_potentials_state is not None:
+                    potentials.restore_state(best_potentials_state)
+                break
 
             # Convergence check
             if abs(prev_loss - total_loss) < self.config.tolerance and iteration > 20:
@@ -342,13 +385,16 @@ class SSDMFOv3(BaseMethod):
                 break
             prev_loss = total_loss
 
-        # Final pass to get responses
-        print("\n[SS-DMFO 3.0] Computing final allocations...")
+        # Final pass: use best potentials with moderate diversity
+        print(f"\n[SS-DMFO 3.0] Computing final allocations...")
+        print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
         final_responses = {}
         for user_id, user in user_patterns.items():
             Q = self.mf_solver.compute_user_response_individual(
                 user, potentials, grid_size,
-                self.config.temp_final, 0.0, use_beta=True
+                self.config.temp_final,
+                self.config.gumbel_final,  # Keep some noise for diversity!
+                use_beta=True
             )
             final_responses[user_id] = Q
 

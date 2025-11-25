@@ -337,11 +337,11 @@ def main():
         gumbel_decay=0.99,
         gumbel_final=0.01,
         interaction_freq=2,
-        top_k=500,                         # 500 important cells
+        top_k=1000,                         # 500 important cells
         log_freq=10,
         early_stop_patience=25,
         phase_separation=True,
-        phase1_ratio=0.15,                 # 15% for spatial only
+        phase1_ratio=0.10,                 # 15% for spatial only
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
     print(f"GPU batch size: {config.gpu_batch_size}, num batches: {(n_loaded + config.gpu_batch_size - 1) // config.gpu_batch_size}")

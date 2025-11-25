@@ -1,12 +1,12 @@
-"""SS-DMFO 对偶优化器
+"""SS-DMFO Dual Optimizer
 
-核心算法流程：
-1. 初始化势函数 α, β
-2. 循环直到收敛：
-   a. 给定势函数，用MFVI计算每个用户的最优响应 Q_i
-   b. 聚合响应得到生成统计 μ_gen, π_gen
-   c. 计算梯度 = 生成统计 - 真实统计
-   d. 更新势函数
+Core algorithm flow:
+1. Initialize potentials alpha, beta
+2. Loop until convergence:
+   a. Given potentials, compute optimal response Q_i for each user via MFVI
+   b. Aggregate responses to get generated statistics mu_gen, pi_gen
+   c. Compute gradient = generated statistics - real statistics
+   d. Update potentials
 """
 
 import numpy as np
@@ -24,7 +24,7 @@ from .mean_field import FastMeanFieldSolver
 
 
 class SSDMFOOptimizer(BaseMethod):
-    """SS-DMFO 对偶优化器"""
+    """SS-DMFO Dual Optimizer"""
 
     def __init__(self,
                  phase: int = 2,
@@ -36,13 +36,13 @@ class SSDMFOOptimizer(BaseMethod):
                  use_adam: bool = True):
         """
         Args:
-            phase: 优化阶段 (1=空间, 2=空间+交互)
-            max_iter: 最大迭代次数
-            lr: 学习率
-            temperature: MFVI温度参数
-            tolerance: 收敛容差
-            log_freq: 日志频率
-            use_adam: 是否使用Adam优化器
+            phase: optimization phase (1=spatial, 2=spatial+interaction)
+            max_iter: maximum iterations
+            lr: learning rate
+            temperature: MFVI temperature parameter
+            tolerance: convergence tolerance
+            log_freq: logging frequency
+            use_adam: whether to use Adam optimizer
         """
         super().__init__(f"SS-DMFO(phase={phase})")
         self.phase = phase
@@ -53,7 +53,7 @@ class SSDMFOOptimizer(BaseMethod):
         self.log_freq = log_freq
         self.use_adam = use_adam
 
-        # MFVI求解器
+        # MFVI solver
         self.mf_solver = FastMeanFieldSolver(
             temperature=temperature,
             max_iter=10,
@@ -63,49 +63,49 @@ class SSDMFOOptimizer(BaseMethod):
     def _generate_allocations(self,
                               constraints: Constraints,
                               user_patterns: Dict[int, UserPattern]) -> Dict[int, np.ndarray]:
-        """运行SS-DMFO优化"""
+        """Run SS-DMFO optimization"""
         grid_h = constraints.grid_h
         grid_w = constraints.grid_w
         grid_size = grid_h * grid_w
 
-        # 归一化约束
+        # Normalize constraints
         constraints.spatial.normalize()
         if constraints.interaction is not None:
             constraints.interaction.normalize()
 
-        # 初始化势函数
+        # Initialize potentials
         print(f"Initializing potentials (phase={self.phase})...")
         potentials = DualPotentials.initialize(
             grid_h, grid_w, phase=self.phase, init_scale=0.01
         )
 
-        # 优化器
+        # Optimizer
         if self.use_adam:
             optimizer = PotentialsWithMomentum(potentials)
         else:
             optimizer = None
 
-        # 优化循环
+        # Optimization loop
         print(f"Starting optimization (max_iter={self.max_iter}, lr={self.lr})...")
         prev_loss = float('inf')
 
         for iteration in range(self.max_iter):
-            # Step 1: 计算所有用户的响应
+            # Step 1: Compute responses for all users
             responses = self.mf_solver.compute_all_responses_fast(
                 user_patterns, potentials, constraints, self.phase
             )
 
-            # Step 2: 聚合统计
+            # Step 2: Aggregate statistics
             gen_spatial = self._aggregate_spatial(
                 responses, user_patterns, grid_h, grid_w
             )
 
-            # Step 3: 计算梯度
+            # Step 3: Compute gradients
             gradients = self._compute_spatial_gradients(
                 gen_spatial, constraints.spatial
             )
 
-            # Phase 2: 交互梯度
+            # Phase 2: Interaction gradients
             if self.phase >= 2 and constraints.interaction is not None:
                 gen_interaction = self._aggregate_interaction(
                     responses, user_patterns, grid_size
@@ -113,31 +113,31 @@ class SSDMFOOptimizer(BaseMethod):
                 interaction_grads = self._compute_interaction_gradients(
                     gen_interaction, constraints.interaction
                 )
-                # 合并梯度（简化版：只用一阶梯度）
-                # TODO: 完整实现需要更新β
+                # Merge gradients (simplified: only use first-order gradients)
+                # TODO: Full implementation needs beta updates
 
-            # Step 4: 计算损失（监控）
+            # Step 4: Compute loss (monitoring)
             loss = self._compute_loss(gen_spatial, constraints.spatial)
 
-            # Step 5: 更新势函数
+            # Step 5: Update potentials
             if self.use_adam:
                 optimizer.step(gradients, self.lr)
             else:
                 for loc_type, grad in gradients.items():
                     potentials.update_alpha(loc_type, grad, self.lr)
 
-            # 日志
+            # Logging
             if iteration % self.log_freq == 0 or iteration < 5:
                 print(f"  Iter {iteration:3d}: Loss = {loss:.6f}")
 
-            # 收敛检查
+            # Convergence check
             if abs(prev_loss - loss) < self.tolerance:
                 print(f"  Converged at iteration {iteration}")
                 break
 
             prev_loss = loss
 
-        # 最终响应作为分配
+        # Final responses as allocations
         final_responses = self.mf_solver.compute_all_responses_fast(
             user_patterns, potentials, constraints, self.phase
         )
@@ -148,7 +148,7 @@ class SSDMFOOptimizer(BaseMethod):
                            responses: Dict[int, np.ndarray],
                            user_patterns: Dict[int, UserPattern],
                            grid_h: int, grid_w: int) -> SpatialConstraints:
-        """聚合空间统计"""
+        """Aggregate spatial statistics"""
         H_map = np.zeros((grid_h, grid_w))
         W_map = np.zeros((grid_h, grid_w))
         O_map = np.zeros((grid_h, grid_w))
@@ -173,7 +173,7 @@ class SSDMFOOptimizer(BaseMethod):
                                user_patterns: Dict[int, UserPattern],
                                grid_size: int,
                                top_k: int = 30) -> InteractionConstraints:
-        """聚合交互统计（简化版，使用top-k）"""
+        """Aggregate interaction statistics (simplified, using top-k)"""
         hw_dict = {}
         ho_dict = {}
         wo_dict = {}
@@ -228,9 +228,9 @@ class SSDMFOOptimizer(BaseMethod):
     def _compute_spatial_gradients(self,
                                    gen: SpatialConstraints,
                                    real: SpatialConstraints) -> Dict[str, np.ndarray]:
-        """计算空间分布的梯度
+        """Compute spatial distribution gradients
 
-        梯度 = 生成分布 - 真实分布
+        Gradient = generated distribution - real distribution
         """
         return {
             'H': gen.H - real.H,
@@ -241,7 +241,7 @@ class SSDMFOOptimizer(BaseMethod):
     def _compute_interaction_gradients(self,
                                        gen: InteractionConstraints,
                                        real: InteractionConstraints) -> Dict[str, sparse.csr_matrix]:
-        """计算交互分布的梯度"""
+        """Compute interaction distribution gradients"""
         return {
             'HW': gen.HW - real.HW,
             'HO': gen.HO - real.HO,
@@ -251,7 +251,7 @@ class SSDMFOOptimizer(BaseMethod):
     def _compute_loss(self,
                       gen: SpatialConstraints,
                       real: SpatialConstraints) -> float:
-        """计算总损失（用于监控）"""
+        """Compute total loss (for monitoring)"""
         def jsd(p, q):
             p = p.flatten() + 1e-10
             q = q.flatten() + 1e-10
@@ -268,7 +268,7 @@ class SSDMFOOptimizer(BaseMethod):
 
 
 class SSDMFOPhase2(SSDMFOOptimizer):
-    """Phase 2专用优化器（同时优化空间和交互约束）"""
+    """Phase 2 specialized optimizer (jointly optimize spatial and interaction constraints)"""
 
     def __init__(self,
                  max_iter: int = 200,
@@ -278,7 +278,7 @@ class SSDMFOPhase2(SSDMFOOptimizer):
                  **kwargs):
         """
         Args:
-            interaction_weight: 交互约束的权重
+            interaction_weight: weight for interaction constraints
         """
         super().__init__(phase=2, max_iter=max_iter, lr=lr,
                          temperature=temperature, **kwargs)
@@ -288,17 +288,17 @@ class SSDMFOPhase2(SSDMFOOptimizer):
     def _generate_allocations(self,
                               constraints: Constraints,
                               user_patterns: Dict[int, UserPattern]) -> Dict[int, np.ndarray]:
-        """Phase 2优化：同时考虑空间和交互约束"""
+        """Phase 2 optimization: jointly consider spatial and interaction constraints"""
         grid_h = constraints.grid_h
         grid_w = constraints.grid_w
         grid_size = grid_h * grid_w
 
-        # 归一化
+        # Normalize
         constraints.spatial.normalize()
         if constraints.interaction is not None:
             constraints.interaction.normalize()
 
-        # 初始化
+        # Initialize
         print(f"Initializing SS-DMFO Phase 2...")
         potentials = DualPotentials.initialize(grid_h, grid_w, phase=2)
 
@@ -309,23 +309,23 @@ class SSDMFOPhase2(SSDMFOOptimizer):
         prev_loss = float('inf')
 
         for iteration in range(self.max_iter):
-            # 计算响应（Phase 2需要考虑交互）
+            # Compute responses (Phase 2 considers interactions)
             responses = self.mf_solver.compute_all_responses_fast(
                 user_patterns, potentials, constraints, phase=2
             )
 
-            # 聚合空间统计
+            # Aggregate spatial statistics
             gen_spatial = self._aggregate_spatial(
                 responses, user_patterns, grid_h, grid_w
             )
 
-            # 计算空间梯度
+            # Compute spatial gradients
             spatial_grads = self._compute_spatial_gradients(gen_spatial, constraints.spatial)
 
-            # 计算损失
+            # Compute loss
             spatial_loss = self._compute_loss(gen_spatial, constraints.spatial)
 
-            # 如果有交互约束，计算交互损失
+            # If interaction constraints exist, compute interaction loss
             interaction_loss = 0.0
             if constraints.interaction is not None:
                 gen_interaction = self._aggregate_interaction(
@@ -337,19 +337,19 @@ class SSDMFOPhase2(SSDMFOOptimizer):
 
             total_loss = spatial_loss + self.interaction_weight * interaction_loss
 
-            # 更新势函数
+            # Update potentials
             if self.use_adam:
                 optimizer.step(spatial_grads, self.lr)
             else:
                 for loc_type, grad in spatial_grads.items():
                     potentials.update_alpha(loc_type, grad, self.lr)
 
-            # 日志
+            # Logging
             if iteration % self.log_freq == 0 or iteration < 5:
                 print(f"  Iter {iteration:3d}: Spatial={spatial_loss:.4f}, "
                       f"Interact={interaction_loss:.4f}, Total={total_loss:.4f}")
 
-            # 收敛
+            # Convergence
             if abs(prev_loss - total_loss) < self.tolerance:
                 print(f"  Converged at iteration {iteration}")
                 break
@@ -362,9 +362,9 @@ class SSDMFOPhase2(SSDMFOOptimizer):
     def _compute_interaction_loss(self,
                                   gen: InteractionConstraints,
                                   real: InteractionConstraints) -> float:
-        """计算交互JSD损失"""
+        """Compute interaction JSD loss"""
         def sparse_jsd(p, q):
-            # 简化版：转为密集计算（小规模可行）
+            # Simplified: convert to dense (feasible for small scale)
             p_arr = p.toarray().flatten() + 1e-10
             q_arr = q.toarray().flatten() + 1e-10
             p_arr = p_arr / p_arr.sum()
@@ -373,7 +373,7 @@ class SSDMFOPhase2(SSDMFOOptimizer):
             return 0.5 * (np.sum(p_arr * np.log(p_arr/m)) +
                          np.sum(q_arr * np.log(q_arr/m)))
 
-        # 只计算非空的
+        # Only compute non-empty
         losses = []
         if gen.HW.nnz > 0 and real.HW.nnz > 0:
             losses.append(sparse_jsd(gen.HW, real.HW))

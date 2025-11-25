@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""测试 SS-DMFO 优化器"""
+"""Test SS-DMFO Optimizer"""
 
 import sys
 import os
@@ -15,7 +15,7 @@ from ssdmfo.evaluation.metrics import MetricsCalculator
 
 
 def test_method(name, method, constraints, user_patterns, calculator, top_k=30):
-    """测试单个方法"""
+    """Test a single method"""
     print(f"\n{'=' * 70}")
     print(f"Testing: {name}")
     print('=' * 70)
@@ -23,14 +23,14 @@ def test_method(name, method, constraints, user_patterns, calculator, top_k=30):
     method_start = time.time()
     result = method.run(constraints, user_patterns)
 
-    # 计算空间统计
+    # Compute spatial statistics
     print("Computing spatial statistics...")
     generated_spatial = result.compute_spatial_stats(
         user_patterns, constraints.grid_h, constraints.grid_w
     )
     generated_spatial.normalize()
 
-    # 计算交互统计
+    # Compute interaction statistics
     print(f"Computing interaction statistics (top_k={top_k})...")
     generated_interaction = result.compute_interaction_stats(
         user_patterns, constraints.grid_h, constraints.grid_w,
@@ -38,7 +38,7 @@ def test_method(name, method, constraints, user_patterns, calculator, top_k=30):
     )
     generated_interaction.normalize()
 
-    # 计算指标
+    # Compute metrics
     metrics = calculator.compute_all_metrics(
         generated_spatial, constraints.spatial,
         generated_interaction, constraints.interaction
@@ -51,14 +51,14 @@ def test_method(name, method, constraints, user_patterns, calculator, top_k=30):
 
 
 def main():
-    """主测试函数"""
+    """Main test function"""
     print("=" * 70)
     print("SS-DMFO OPTIMIZATION TEST")
     print("=" * 70)
 
     total_start = time.time()
 
-    # 加载数据
+    # Load data
     print("\n[Step 1] Loading data...")
     loader = ConstraintDataLoader(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'EV_Splatting')
@@ -69,13 +69,13 @@ def main():
     print(f"Interaction constraints: HW={constraints.interaction.HW.nnz}, "
           f"HO={constraints.interaction.HO.nnz}, WO={constraints.interaction.WO.nnz}")
 
-    # 加载用户
+    # Load users
     print("\n[Step 2] Loading user patterns...")
     n_users = 100
     user_patterns = loader.load_user_patterns(n_users=n_users)
     print(f"Loaded {len(user_patterns)} users")
 
-    # 测试方法
+    # Test methods
     calculator = MetricsCalculator()
     results = {}
 
@@ -85,27 +85,27 @@ def main():
         constraints, user_patterns, calculator
     )
 
-    # 2. IPF Phase 1 (空间约束)
+    # 2. IPF Phase 1 (spatial constraints)
     results["IPF-P1"] = test_method(
         "IPF Phase 1", IterativeProportionalFitting(max_iter=20),
         constraints, user_patterns, calculator
     )
 
-    # 3. SS-DMFO Phase 1 (仅空间)
+    # 3. SS-DMFO Phase 1 (spatial only)
     results["SSDMFO-P1"] = test_method(
         "SS-DMFO Phase 1",
         SSDMFOOptimizer(phase=1, max_iter=50, lr=0.1, temperature=1.0),
         constraints, user_patterns, calculator
     )
 
-    # 4. SS-DMFO Phase 2 (空间+交互)
+    # 4. SS-DMFO Phase 2 (spatial + interaction)
     results["SSDMFO-P2"] = test_method(
         "SS-DMFO Phase 2",
         SSDMFOPhase2(max_iter=100, lr=0.05, temperature=0.5),
         constraints, user_patterns, calculator
     )
 
-    # 总结
+    # Summary
     print("\n\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
@@ -118,7 +118,7 @@ def main():
         total = metrics['jsd_total_mean']
         print(f"{name:<15} {spatial:<12.4f} {interact:<12.4f} {total:<12.4f}")
 
-    # 分析
+    # Analysis
     print("\n" + "=" * 70)
     print("ANALYSIS")
     print("=" * 70)

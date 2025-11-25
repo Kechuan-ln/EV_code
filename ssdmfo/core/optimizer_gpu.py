@@ -638,23 +638,21 @@ class SSDMFOv3GPU(BaseMethod):
         """Smart interaction computation: Important Cells + Sparse Outer Products
 
         Strategy:
-        1. Identify important cells from real spatial constraints (foundation)
+        1. Identify important cells from aggregate distributions
         2. For each user, compute sparse outer product (captures true correlation)
-        3. Aggregate across users (true joint distribution, not independence)
-
-        This avoids the 40885×40885 full matrix while capturing real correlations.
+        3. Process in mini-batches to avoid OOM
+        4. Aggregate across users (true joint distribution)
         """
         n_users = user_data.n_users
-        n_important = self.config.top_k  # Reuse top_k as number of important cells
+        n_important = min(self.config.top_k, 500)  # Cap at 500 to avoid OOM
 
-        # Step 1: Identify important cells from aggregate distributions
-        # These are cells where users actually have significant probability
+        # Step 1: Aggregate by type
         H_agg = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
         W_agg = (Q * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
         O_agg = (Q * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
 
-        # Get important cell indices based on total probability mass
-        H_total = H_agg.sum(dim=0)  # (grid_size,)
+        # Get important cell indices
+        H_total = H_agg.sum(dim=0)
         W_total = W_agg.sum(dim=0)
         O_total = O_agg.sum(dim=0)
 
@@ -662,27 +660,51 @@ class SSDMFOv3GPU(BaseMethod):
         _, W_important = torch.topk(W_total, min(n_important, grid_size))
         _, O_important = torch.topk(O_total, min(n_important, grid_size))
 
-        # Step 2: For each user, compute sparse outer product at important positions only
-        # Extract values at important positions: (n_users, n_important)
-        H_vals = H_agg[:, H_important]
+        # Extract values at important positions
+        H_vals = H_agg[:, H_important]  # (n_users, n_important)
         W_vals = W_agg[:, W_important]
         O_vals = O_agg[:, O_important]
 
-        # Normalize per user (each user's contribution should sum to 1)
+        # Normalize per user
         H_vals = H_vals / (H_vals.sum(dim=1, keepdim=True) + 1e-10)
         W_vals = W_vals / (W_vals.sum(dim=1, keepdim=True) + 1e-10)
         O_vals = O_vals / (O_vals.sum(dim=1, keepdim=True) + 1e-10)
 
-        # Compute outer products for ALL users at once: (n_users, n_important, n_important)
-        # This captures the TRUE correlation structure per user
-        HW_outer = torch.bmm(H_vals.unsqueeze(2), W_vals.unsqueeze(1))
-        HO_outer = torch.bmm(H_vals.unsqueeze(2), O_vals.unsqueeze(1))
-        WO_outer = torch.bmm(W_vals.unsqueeze(2), O_vals.unsqueeze(1))
+        # Step 2: Compute outer products in MINI-BATCHES to avoid OOM
+        # Memory per batch: batch_size × n_important × n_important × 4 bytes × 3
+        # For batch=200, n_important=500: 200 × 500 × 500 × 4 × 3 = 600MB
+        mini_batch_size = 200
+        n_mini_batches = (n_users + mini_batch_size - 1) // mini_batch_size
 
-        # Step 3: Aggregate across users (mean, not sum, to get probability)
-        HW_agg = HW_outer.mean(dim=0)  # (n_important, n_important)
-        HO_agg = HO_outer.mean(dim=0)
-        WO_agg = WO_outer.mean(dim=0)
+        HW_sum = torch.zeros(n_important, n_important, device=self.device, dtype=self.dtype)
+        HO_sum = torch.zeros(n_important, n_important, device=self.device, dtype=self.dtype)
+        WO_sum = torch.zeros(n_important, n_important, device=self.device, dtype=self.dtype)
+
+        for mb in range(n_mini_batches):
+            start = mb * mini_batch_size
+            end = min(start + mini_batch_size, n_users)
+
+            H_batch = H_vals[start:end]  # (batch, n_important)
+            W_batch = W_vals[start:end]
+            O_batch = O_vals[start:end]
+
+            # Outer products for this batch
+            HW_outer = torch.bmm(H_batch.unsqueeze(2), W_batch.unsqueeze(1))  # (batch, n_imp, n_imp)
+            HO_outer = torch.bmm(H_batch.unsqueeze(2), O_batch.unsqueeze(1))
+            WO_outer = torch.bmm(W_batch.unsqueeze(2), O_batch.unsqueeze(1))
+
+            # Accumulate
+            HW_sum += HW_outer.sum(dim=0)
+            HO_sum += HO_outer.sum(dim=0)
+            WO_sum += WO_outer.sum(dim=0)
+
+            # Free memory
+            del HW_outer, HO_outer, WO_outer
+
+        # Average
+        HW_agg = HW_sum / n_users
+        HO_agg = HO_sum / n_users
+        WO_agg = WO_sum / n_users
 
         # Convert to CPU numpy
         HW_np = HW_agg.cpu().numpy()
@@ -693,7 +715,7 @@ class SSDMFOv3GPU(BaseMethod):
         W_idx = W_important.cpu().numpy()
         O_idx = O_important.cpu().numpy()
 
-        # Build sparse matrices with correct global indices
+        # Build sparse matrices
         def build_sparse_interaction(values, row_idx, col_idx):
             rows, cols = np.meshgrid(row_idx, col_idx, indexing='ij')
             mask = values > 1e-10
@@ -711,7 +733,7 @@ class SSDMFOv3GPU(BaseMethod):
         gen_interaction = InteractionConstraints(HW=HW, HO=HO, WO=WO)
         gen_interaction.normalize()
 
-        # Compute JSD with real interaction
+        # Compute JSD
         loss = self._interaction_jsd_cpu(gen_interaction, real_interaction)
 
         return loss, gen_interaction

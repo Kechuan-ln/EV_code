@@ -494,28 +494,42 @@ class SSDMFOSparse(BaseMethod):
                 break
 
         # Final pass - use alpha only (no beta/MFVI) for stable output
-        # Beta is optimized for aggregate statistics, not individual allocations
+        # Use multiple samples with small noise and average for stable statistics
         print(f"\n[SS-DMFO Sparse] Computing final allocations...")
         print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
-        print(f"  Using alpha-only mode (no MFVI) for stable final allocations")
+        print(f"  Using alpha-only mode with averaged samples")
 
         final_responses = {}
+        n_samples = 5  # Average over multiple noisy samples for stability
+
         for user_data in user_data_batches:
-            # Use low temperature and no Gumbel noise for deterministic output
-            # use_beta=False to avoid MFVI which can destabilize with temperature mismatch
-            Q_final = self._batch_forward(
-                user_data, potentials, grid_size,
-                temperature=0.5,  # Moderate temperature for sharp but stable distributions
-                gumbel_scale=0.0,  # No noise for final allocation
-                use_beta=False  # Skip MFVI - alpha alone gives good spatial match
-            )
+            Q_sum = None
+
+            for sample_idx in range(n_samples):
+                Q_sample = self._batch_forward(
+                    user_data, potentials, grid_size,
+                    temperature=1.0,  # Match optimization temperature
+                    gumbel_scale=0.05,  # Small noise for diversity
+                    use_beta=False  # Skip MFVI to avoid temperature mismatch
+                )
+
+                if Q_sum is None:
+                    Q_sum = Q_sample
+                else:
+                    Q_sum = Q_sum + Q_sample
+
+                del Q_sample
+
+            # Average and normalize
+            Q_final = Q_sum / n_samples
+            Q_final = Q_final / (Q_final.sum(dim=-1, keepdim=True) + 1e-10)
 
             Q_np = Q_final.cpu().numpy()
             for u_idx, user_id in enumerate(user_data.user_ids):
                 n = user_data.n_locs[u_idx].item()
                 final_responses[user_id] = Q_np[u_idx, :n, :]
 
-            del Q_final
+            del Q_final, Q_sum
 
         return final_responses
 

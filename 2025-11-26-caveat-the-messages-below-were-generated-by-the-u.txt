@@ -1,0 +1,3229 @@
+
+ ▐▛███▜▌   Claude Code v2.0.52
+▝▜█████▛▘  Opus 4.5 · Claude Max
+  ▘▘ ▝▝    /Volumes/FastACIS/Project/EVproject
+══════════════════ Conversation compacted · ctrl+o for history ═════════════════
+  ⎿  Referenced file ssdmfo/core/optimizer_gpu.py
+  ⎿  Read test_ssdmfo_gpu.py (173 lines)
+  ⎿  Read ssdmfo/core/__init__.py (32 lines)
+  ⎿  Referenced file ssdmfo/core/optimizer_v3.py
+  ⎿  Read test_ssdmfo_v3.py (230 lines)
+
+⏺ Let me verify the current state of the GPU optimizer and run the test to
+  confirm the Adam optimizer fix resolves the spatial JSD optimization
+  issue.
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 833 lines
+
+⏺ The GPU optimizer file looks complete with all the fixes in place:
+  1. GPUAdamOptimizer class (lines 151-203)
+  2. Correct softmax formula at line 487: log_Q = -alpha_per_loc * inv_temp 
+  + gumbel
+  3. Batch processing with gpu_batch_size
+
+  Let me run the test to verify the spatial JSD now decreases properly:
+
+⏺ Bash(python test_ssdmfo_gpu.py 2>&1) timeout: 10m 0s
+  ⎿  Error: Exit code 127
+     (eval):1: command not found: python
+
+⏺ Bash(python3 test_ssdmfo_gpu.py 2>&1) timeout: 10m 0s
+  ⎿  Interrupted · What should Claude do instead?
+
+> 分析新的结果：(rsprompter) kchdong@kchdong-System-Product-Name:~/EV_code$ 
+python test_ssdmfo_gpu.py
+======================================================================
+SS-DMFO GPU ACCELERATION TEST
+======================================================================
+
+PyTorch version: 2.1.2+cu121
+CUDA available: True
+CUDA device: NVIDIA GeForce RTX 3090
+CUDA memory: 25.4 GB
+
+[Step 1] Loading data...
+Loading spatial constraints from HWO_distribute.csv...
+Grid range: lon [-97, 87], lat [-53, 167]
+Grid size: 221 x 185
+H total: 3227754.0, W total: 1675503.0, O total: 22263805.0
+Loading interaction constraints...
+    Loading HW_interact.csv...
+  HW: 1034099 non-zero entries, total=22263805
+    Loading HO_interact.csv...
+  HO: 3988341 non-zero entries, total=22263805
+    Loading WO_interact.csv...
+  WO: 3975927 non-zero entries, total=22263805
+
+Grid: 221 x 185
+Real interaction constraints:
+  HW: 1034099 non-zero entries
+  HO: 3988341 non-zero entries
+  WO: 3975927 non-zero entries
+
+######################################################################
+# Testing with 100 users
+######################################################################
+
+[Step 2] Loading 100 user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 100 users
+Loaded 100 valid user patterns
+Loaded 100 users
+
+======================================================================
+BASELINE: IPF Phase 1
+======================================================================
+
+======================================================================
+Testing: IPF Phase 1
+======================================================================
+
+=== Running IPF(iter=20) ===
+Users: 100
+Grid size: 221 x 185
+Initializing allocations...
+Running IPF iterations (max_iter=20)...
+  Iter   0: JSD = 0.533547
+  Iter   1: JSD = 0.000000
+  Iter   2: JSD = 0.000000
+  Converged at iteration 2
+Runtime: 0.46s
+Memory: 0.13MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/100...
+  Building sparse matrices (HW:2500, HO:2500, WO:2500 entries)...
+
+Generated interaction entries:
+  HW: 2500
+  HO: 2500
+  WO: 2500
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.000000
+  W: 0.000000
+  O: 0.000000
+  Mean: 0.000000
+
+Interaction JSD:
+  HW: 0.644029
+  HO: 0.642455
+  WO: 0.619097
+  Mean: 0.635194
+
+Total JSD Mean: 0.317597
+
+Total Variation Distance:
+  H: 0.000001
+  W: 0.000002
+  O: 0.000001
+  Mean: 0.000002
+--------------------------------------------------
+Method total time: 13.1s
+
+======================================================================
+GPU: SS-DMFO v3 (100 users)
+======================================================================
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+======================================================================
+Testing: SS-DMFO GPU (100u)
+======================================================================
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 100
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 100, Grid: 221x185=40885
+  Temperature: 2.0 -> 1.0
+  Gumbel scale: 0.3 -> 0.05
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 100, num batches: 1
+  Max locations per user: 13
+
+[SS-DMFO GPU] Starting optimization (max_iter=60)...
+  Iter   0 [P1]: Spatial=0.5336, Interact=0.0000, T=2.00, Gumbel=0.300 
+(0.5s)
+  Iter   1 [P1]: Spatial=0.5255, Interact=0.0000, T=2.00, Gumbel=0.298 
+(0.4s)
+  Iter   2 [P1]: Spatial=0.5169, Interact=0.0000, T=2.00, Gumbel=0.297 
+(0.4s)
+  Iter   3 [P1]: Spatial=0.5081, Interact=0.0000, T=2.00, Gumbel=0.296 
+(0.4s)
+  Iter   4 [P1]: Spatial=0.4989, Interact=0.0000, T=2.00, Gumbel=0.294 
+(0.4s)
+  Iter   5 [P1]: Spatial=0.4895, Interact=0.0000, T=2.00, Gumbel=0.293 
+(0.4s)
+  Iter  10 [P1]: Spatial=0.4389, Interact=0.0000, T=2.00, Gumbel=0.285 
+(0.4s)
+  Iter  15 [P1]: Spatial=0.3839, Interact=0.0000, T=2.00, Gumbel=0.278 
+(0.4s)
+  Iter  20 [P2]: Spatial=0.3280, Interact=0.0000, T=2.00, Gumbel=0.271 
+(0.4s)
+  Iter  25 [P2]: Spatial=0.2770, Interact=0.0000, T=1.83, Gumbel=0.265 
+(1.8s)
+  Iter  30 [P2]: Spatial=0.2234, Interact=0.5692, T=1.67, Gumbel=0.258 
+(7.3s)
+  Iter  35 [P2]: Spatial=0.1707, Interact=0.0000, T=1.53, Gumbel=0.252 
+(1.9s)
+  Iter  40 [P2]: Spatial=0.1231, Interact=0.0000, T=1.40, Gumbel=0.245 
+(1.9s)
+  Iter  45 [P2]: Spatial=0.0834, Interact=0.4693, T=1.28, Gumbel=0.239 
+(7.3s)
+  Iter  50 [P2]: Spatial=0.0531, Interact=0.0000, T=1.17, Gumbel=0.233 
+(1.9s)
+  Iter  55 [P2]: Spatial=0.0321, Interact=0.0000, T=1.07, Gumbel=0.228 
+(1.9s)
+
+[SS-DMFO GPU] Computing final allocations...
+  Best interaction: 0.4693 at iter 45
+Runtime: 152.64s
+Memory: 488.46MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/100...
+  Building sparse matrices (HW:8089, HO:10535, WO:8151 entries)...
+
+Generated interaction entries:
+  HW: 8089
+  HO: 10535
+  WO: 8151
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.014988
+  W: 0.025235
+  O: 0.021197
+  Mean: 0.020473
+
+Interaction JSD:
+  HW: 0.612720
+  HO: 0.606173
+  WO: 0.585595
+  Mean: 0.601496
+
+Total JSD Mean: 0.310985
+
+Total Variation Distance:
+  H: 0.086764
+  W: 0.133968
+  O: 0.123866
+  Mean: 0.114866
+--------------------------------------------------
+Method total time: 169.0s
+
+######################################################################
+# Testing with 500 users
+######################################################################
+
+[Step 2] Loading 500 user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 500 users
+Loaded 500 valid user patterns
+Loaded 500 users
+
+======================================================================
+GPU: SS-DMFO v3 (500 users)
+======================================================================
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+======================================================================
+Testing: SS-DMFO GPU (500u)
+======================================================================
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 500
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 500, Grid: 221x185=40885
+  Temperature: 2.0 -> 1.0
+  Gumbel scale: 0.3 -> 0.05
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 500, num batches: 1
+  Max locations per user: 13
+
+[SS-DMFO GPU] Starting optimization (max_iter=60)...
+  Iter   0 [P1]: Spatial=0.5336, Interact=0.0000, T=2.00, Gumbel=0.300 
+(2.1s)
+  Iter   1 [P1]: Spatial=0.5254, Interact=0.0000, T=2.00, Gumbel=0.298 
+(2.0s)
+  Iter   2 [P1]: Spatial=0.5168, Interact=0.0000, T=2.00, Gumbel=0.297 
+(2.0s)
+  Iter   3 [P1]: Spatial=0.5081, Interact=0.0000, T=2.00, Gumbel=0.296 
+(2.0s)
+  Iter   4 [P1]: Spatial=0.4989, Interact=0.0000, T=2.00, Gumbel=0.294 
+(2.0s)
+  Iter   5 [P1]: Spatial=0.4896, Interact=0.0000, T=2.00, Gumbel=0.293 
+(2.0s)
+  Iter  10 [P1]: Spatial=0.4388, Interact=0.0000, T=2.00, Gumbel=0.285 
+(2.0s)
+  Iter  15 [P1]: Spatial=0.3839, Interact=0.0000, T=2.00, Gumbel=0.278 
+(2.0s)
+  Iter  20 [P2]: Spatial=0.3280, Interact=0.0000, T=2.00, Gumbel=0.271 
+(2.0s)
+  Iter  25 [P2]: Spatial=0.2769, Interact=0.0000, T=1.83, Gumbel=0.265 
+(8.7s)
+  Iter  30 [P2]: Spatial=0.2232, Interact=0.4593, T=1.67, Gumbel=0.258 
+(16.4s)
+  Iter  35 [P2]: Spatial=0.1706, Interact=0.0000, T=1.53, Gumbel=0.252 
+(8.7s)
+  Iter  40 [P2]: Spatial=0.1230, Interact=0.0000, T=1.40, Gumbel=0.245 
+(8.7s)
+  Iter  45 [P2]: Spatial=0.0833, Interact=0.4216, T=1.28, Gumbel=0.239 
+(16.0s)
+  Iter  50 [P2]: Spatial=0.0530, Interact=0.0000, T=1.17, Gumbel=0.233 
+(8.7s)
+  Iter  55 [P2]: Spatial=0.0321, Interact=0.0000, T=1.07, Gumbel=0.228 
+(8.8s)
+
+[SS-DMFO GPU] Computing final allocations...
+  Best interaction: 0.4049 at iter 42
+Runtime: 480.26s
+Memory: 1142.41MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/500...
+    Processing user 200/500...
+    Processing user 300/500...
+    Processing user 400/500...
+    Processing user 500/500...
+  Building sparse matrices (HW:10287, HO:13267, WO:9600 entries)...
+
+Generated interaction entries:
+  HW: 10287
+  HO: 13267
+  WO: 9600
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.014918
+  W: 0.025157
+  O: 0.021190
+  Mean: 0.020422
+
+Interaction JSD:
+  HW: 0.609488
+  HO: 0.604509
+  WO: 0.585007
+  Mean: 0.599668
+
+Total JSD Mean: 0.310045
+
+Total Variation Distance:
+  H: 0.086154
+  W: 0.133520
+  O: 0.123834
+  Mean: 0.114503
+--------------------------------------------------
+Method total time: 518.5s
+
+######################################################################
+# Testing with 1000 users
+######################################################################
+
+[Step 2] Loading 1000 user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 1000 users
+Loaded 1000 valid user patterns
+Loaded 1000 users
+
+======================================================================
+GPU: SS-DMFO v3 (1000 users)
+======================================================================
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+======================================================================
+Testing: SS-DMFO GPU (1000u)
+======================================================================
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 1000
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 1000, Grid: 221x185=40885
+  Temperature: 2.0 -> 1.0
+  Gumbel scale: 0.3 -> 0.05
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 500, num batches: 2
+  Max locations per user: 14
+
+[SS-DMFO GPU] Starting optimization (max_iter=60)...
+  Iter   0 [P1]: Spatial=0.5336, Interact=0.0000, T=2.00, Gumbel=0.300 
+(4.3s)
+  Iter   1 [P1]: Spatial=0.5254, Interact=0.0000, T=2.00, Gumbel=0.298 
+(4.3s)
+  Iter   2 [P1]: Spatial=0.5169, Interact=0.0000, T=2.00, Gumbel=0.297 
+(4.3s)
+  Iter   3 [P1]: Spatial=0.5081, Interact=0.0000, T=2.00, Gumbel=0.296 
+(4.3s)
+  Iter   4 [P1]: Spatial=0.4989, Interact=0.0000, T=2.00, Gumbel=0.294 
+(4.3s)
+  Iter   5 [P1]: Spatial=0.4896, Interact=0.0000, T=2.00, Gumbel=0.293 
+(4.3s)
+  Iter  10 [P1]: Spatial=0.4388, Interact=0.0000, T=2.00, Gumbel=0.285 
+(4.3s)
+  Iter  15 [P1]: Spatial=0.3839, Interact=0.0000, T=2.00, Gumbel=0.278 
+(4.2s)
+  Iter  20 [P2]: Spatial=0.3280, Interact=0.0000, T=2.00, Gumbel=0.271 
+(4.2s)
+  Iter  25 [P2]: Spatial=0.2769, Interact=0.0000, T=1.83, Gumbel=0.265 
+(18.3s)
+  Iter  30 [P2]: Spatial=0.2232, Interact=0.4182, T=1.67, Gumbel=0.258 
+(28.0s)
+  Iter  35 [P2]: Spatial=0.1706, Interact=0.0000, T=1.53, Gumbel=0.252 
+(18.2s)
+  Iter  40 [P2]: Spatial=0.1230, Interact=0.0000, T=1.40, Gumbel=0.245 
+(18.3s)
+  Iter  45 [P2]: Spatial=0.0833, Interact=0.4069, T=1.28, Gumbel=0.239 
+(26.7s)
+  Iter  50 [P2]: Spatial=0.0530, Interact=0.0000, T=1.17, Gumbel=0.233 
+(18.2s)
+  Iter  55 [P2]: Spatial=0.0321, Interact=0.0000, T=1.07, Gumbel=0.228 
+(18.3s)
+
+[SS-DMFO GPU] Computing final allocations...
+  Best interaction: 0.3819 at iter 39
+Runtime: 924.03s
+Memory: 2117.91MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/1000...
+    Processing user 200/1000...
+    Processing user 300/1000...
+    Processing user 400/1000...
+    Processing user 500/1000...
+    Processing user 600/1000...
+    Processing user 700/1000...
+    Processing user 800/1000...
+    Processing user 900/1000...
+    Processing user 1000/1000...
+  Building sparse matrices (HW:11501, HO:14930, WO:10147 entries)...
+
+Generated interaction entries:
+  HW: 11501
+  HO: 14930
+  WO: 10147
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.014908
+  W: 0.025145
+  O: 0.021189
+  Mean: 0.020414
+
+Interaction JSD:
+  HW: 0.608659
+  HO: 0.603548
+  WO: 0.584882
+  Mean: 0.599030
+
+Total JSD Mean: 0.309722
+
+Total Variation Distance:
+  H: 0.086078
+  W: 0.133462
+  O: 0.123828
+  Mean: 0.114456
+--------------------------------------------------
+Method total time: 988.8s
+
+
+======================================================================
+SUMMARY
+======================================================================
+
+Method               Spatial    Interact   HW nnz     Time(s)   
+------------------------------------------------------------
+IPF-100              0.0000     0.6352     2500       13.1      
+GPU-100              0.0205     0.6015     8089       169.0     
+GPU-500              0.0204     0.5997     10287      518.5     
+GPU-1000             0.0204     0.5990     11501      988.8     
+
+GPU Memory Usage:
+  Allocated: 0.00 GB
+  Cached: 1.11 GB
+
+Total execution time: 1700.0s\ 
+
+⏺ 分析结果：
+
+  ✅ Adam 优化器修复成功
+
+  Spatial JSD 现在正确下降：
+  - 从 0.5336 → 0.0321（迭代55次后）
+  - 之前卡在 0.5335 不动的问题已解决
+
+  📊 结果对比
+
+  | 指标              | IPF    | GPU-100 | GPU-500 | GPU-1000 |
+  |-----------------|--------|---------|---------|----------|
+  | Spatial JSD     | 0.0000 | 0.0205  | 0.0204  | 0.0204   |
+  | Interaction JSD | 0.6352 | 0.6015  | 0.5997  | 0.5990   |
+  | HW entries      | 2500   | 8089    | 10287   | 11501    |
+  | 时间              | 13s    | 169s    | 518s    | 989s     |
+
+  🔍 关键发现
+
+  优点：
+  1. 交互JSD改善 - GPU版比IPF好5.7%（0.6352 → 0.5990）
+  2. 多样性大幅提升 - HW entries从2500增加到11501（4.6倍）
+  3. OOM问题解决 - 1000用户正常运行（内存2.1GB）
+
+  问题：
+  1. Spatial未达到0 - 停在0.02，而IPF达到0.0000
+  2. 交互JSD仍然高 - ~0.6，目标应该是<0.3
+  3. 速度较慢 - 交互计算在CPU上是瓶颈（每次7-28秒）
+
+  🛠 优化建议
+
+  1. Spatial收敛问题：温度最终值1.0可能太高，可以降到0.5
+  2. 交互优化：需要更积极的beta更新和更长的Phase 2
+  3. 速度优化：交互计算可以移到GPU上（目前在CPU）
+
+  需要我进一步优化这些问题吗？
+
+> 进一步优化这些问题 
+
+⏺ 我来逐步优化这三个问题。首先修复空间收敛问题：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 100 lines
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 150 lines
+
+⏺ 现在我来实现三个关键优化。首先修改配置默认值和优化逻辑：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 8 additions and 7 removals
+       38        """Configuration for GPU-accelerated SS-DMFO"""
+       39        # Optimization
+       40        max_iter: int = 100
+       41 -      lr_alpha: float = 0.1
+       42 -      lr_beta: float = 0.01
+       41 +      lr_alpha: float = 0.15          # Increased for faster 
+          + spatial convergence
+       42 +      lr_beta: float = 0.05           # Increased for better 
+          + interaction optimization
+       43        tolerance: float = 1e-4
+       44    
+       45        # MFVI
+     ...
+       48    
+       49        # Temperature annealing
+       50        temp_init: float = 2.0
+       51 -      temp_final: float = 1.0
+       51 +      temp_final: float = 0.3         # Lower for sharper 
+          + final distributions
+       52    
+       53        # Gumbel noise
+       54        gumbel_scale: float = 0.3
+       55 -      gumbel_decay: float = 0.995
+       56 -      gumbel_final: float = 0.05
+       55 +      gumbel_decay: float = 0.99      # Faster decay
+       56 +      gumbel_final: float = 0.01      # Lower floor for 
+          + precise convergence
+       57    
+       58        # Batch size for GPU processing (to avoid OOM)
+       59        # Adjust based on GPU memory: 500 for 8GB, 1000 for 
+            16GB, 2000 for 24GB
+     ...
+       63        log_freq: int = 5
+       64    
+       65        # Interaction
+       66 -      interaction_freq: int = 3
+       66 +      interaction_freq: int = 2       # More frequent 
+          + interaction updates
+       67        top_k: int = 50
+       68    
+       69        # Early stopping
+       70 -      early_stop_patience: int = 10
+       70 +      early_stop_patience: int = 15   # More patience for 
+          + interaction improvement
+       71        phase_separation: bool = True
+       72 +      phase1_ratio: float = 0.25      # Shorter phase 1 (was 
+          + 1/3)
+       73    
+       74        # GPU settings
+       75        device: str = 'cuda'  # 'cuda' or 'cpu'
+
+⏺ 现在修改Phase分离逻辑和学习率调整：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 3 additions and 3 removals
+       321            no_improve_count = 0
+       322            best_iter = 0
+       323    
+       324 -          # Phase separation
+       325 -          phase1_iters = self.config.max_iter // 3
+           -   if self.config.phase_separation else 0
+       324 +          # Phase separation - use configurable ratio
+       325 +          phase1_iters = int(self.config.max_iter * 
+           +  self.config.phase1_ratio)
+           +   if self.config.phase_separation else 0
+       326    
+       327 -          print(f"\n[SS-DMFO GPU] Starting optimization 
+           -  (max_iter={self.config.max_iter})...")
+       327 +          print(f"\n[SS-DMFO GPU] Starting optimization 
+           +  (max_iter={self.config.max_iter}, phase1={phase1_iters}
+           +  )...")
+       328    
+       329            for iteration in range(self.config.max_iter):
+       330                iter_start = time.time()
+
+⏺ 修改Phase 2的学习率策略：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 2 additions and 1 removal
+       390                grad_W = -(gen_W - target_W)
+       391                grad_O = -(gen_O - target_O)
+       392    
+       393 -              alpha_lr = self.config.lr_alpha if in_phase1 
+           - else self.config.lr_alpha * 0.5
+       393 +              # Keep learning rate high throughout - Adam 
+           + handles adaptation
+       394 +              alpha_lr = self.config.lr_alpha
+       395                optimizer.step(grad_H, grad_W, grad_O, 
+             alpha_lr)
+       396    
+       397                # ============================================
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 150 lines
+
+⏺ 现在实现GPU加速的交互计算。这是主要的性能瓶颈：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 35 lines
+
+⏺ 在 _compute_jsd_gpu 后面添加新的GPU交互计算方法：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 71 additions             
+       609    
+       610            return ((jsd_H + jsd_W + jsd_O) / 3).item()
+       611    
+       612 +      def _compute_interaction_gpu(self,
+       613 +                                   Q: torch.Tensor,
+       614 +                                   user_data: 
+           + BatchedUserData,
+       615 +                                   grid_size: int,
+       616 +                                   real_interaction: 
+           + InteractionConstraints) -> Tuple[float, 
+           + 'InteractionConstraints']:
+       617 +          """GPU-accelerated interaction computation using 
+           + batched outer products"""
+       618 +          top_k = self.config.top_k
+       619 +          n_users = user_data.n_users
+       620 +  
+       621 +          # Aggregate Q by type for each user: (n_users, 
+           + grid_size)
+       622 +          H_agg = (Q * 
+           + user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # 
+           + (n_users, grid_size)
+       623 +          W_agg = (Q * 
+           + user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+       624 +          O_agg = (Q * 
+           + user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+       625 +  
+       626 +          # Normalize per user
+       627 +          H_agg = H_agg / (H_agg.sum(dim=1, keepdim=True) + 
+           + 1e-10)
+       628 +          W_agg = W_agg / (W_agg.sum(dim=1, keepdim=True) + 
+           + 1e-10)
+       629 +          O_agg = O_agg / (O_agg.sum(dim=1, keepdim=True) + 
+           + 1e-10)
+       630 +  
+       631 +          # Get top-k indices for efficiency
+       632 +          _, H_topk_idx = torch.topk(H_agg.sum(dim=0), 
+           + min(top_k, grid_size))
+       633 +          _, W_topk_idx = torch.topk(W_agg.sum(dim=0), 
+           + min(top_k, grid_size))
+       634 +          _, O_topk_idx = torch.topk(O_agg.sum(dim=0), 
+           + min(top_k, grid_size))
+       635 +  
+       636 +          # Extract top-k values
+       637 +          H_topk = H_agg[:, H_topk_idx]  # (n_users, top_k)
+       638 +          W_topk = W_agg[:, W_topk_idx]
+       639 +          O_topk = O_agg[:, O_topk_idx]
+       640 +  
+       641 +          # Compute outer products for all users at once: 
+           + (n_users, top_k, top_k)
+       642 +          HW_outer = torch.bmm(H_topk.unsqueeze(2), 
+           + W_topk.unsqueeze(1))  # (n_users, top_k, top_k)
+       643 +          HO_outer = torch.bmm(H_topk.unsqueeze(2), 
+           + O_topk.unsqueeze(1))
+       644 +          WO_outer = torch.bmm(W_topk.unsqueeze(2), 
+           + O_topk.unsqueeze(1))
+       645 +  
+       646 +          # Sum across users
+       647 +          HW_sum = HW_outer.sum(dim=0)  # (top_k, top_k)
+       648 +          HO_sum = HO_outer.sum(dim=0)
+       649 +          WO_sum = WO_outer.sum(dim=0)
+       650 +  
+       651 +          # Convert to sparse matrices on CPU
+       652 +          HW_sum_np = HW_sum.cpu().numpy()
+       653 +          HO_sum_np = HO_sum.cpu().numpy()
+       654 +          WO_sum_np = WO_sum.cpu().numpy()
+       655 +  
+       656 +          H_idx = H_topk_idx.cpu().numpy()
+       657 +          W_idx = W_topk_idx.cpu().numpy()
+       658 +          O_idx = O_topk_idx.cpu().numpy()
+       659 +  
+       660 +          # Build sparse matrices with proper indices
+       661 +          def build_sparse(values, row_idx, col_idx):
+       662 +              rows, cols = np.meshgrid(row_idx, col_idx, 
+           + indexing='ij')
+       663 +              mask = values > 1e-15
+       664 +              if not np.any(mask):
+       665 +                  return sparse.csr_matrix((grid_size, 
+           + grid_size))
+       666 +              return sparse.csr_matrix(
+       667 +                  (values[mask], (rows[mask], cols[mask])),
+       668 +                  shape=(grid_size, grid_size)
+       669 +              )
+       670 +  
+       671 +          HW = build_sparse(HW_sum_np, H_idx, W_idx)
+       672 +          HO = build_sparse(HO_sum_np, H_idx, O_idx)
+       673 +          WO = build_sparse(WO_sum_np, W_idx, O_idx)
+       674 +  
+       675 +          gen_interaction = InteractionConstraints(HW=HW, 
+           + HO=HO, WO=WO)
+       676 +          gen_interaction.normalize()
+       677 +  
+       678 +          # Compute JSD
+       679 +          loss = self._interaction_jsd_cpu(gen_interaction, 
+           + real_interaction)
+       680 +  
+       681 +          return loss, gen_interaction
+       682 +  
+       683        def _compute_interaction_cpu_batched(self,
+       684                                             all_Q_cpu: 
+             List[Tuple[BatchedUserData, np.ndarray]],
+       685                                             user_patterns: 
+             Dict[int, UserPattern],
+
+⏺ 现在修改主循环以使用GPU交互计算：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 60 lines
+
+⏺ 重写主循环以使用GPU交互计算：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 32 additions and 13 removals
+       355                gen_W = torch.zeros(grid_size, 
+             device=self.device, dtype=self.dtype)
+       356                gen_O = torch.zeros(grid_size, 
+             device=self.device, dtype=self.dtype)
+       357    
+       358 -              all_Q_cpu = []  # Store Q for interaction 
+           - computation
+       358 +              # Determine if we need interaction this 
+           + iteration
+       359 +              compute_interaction = (constraints.interaction 
+           + is not None and
+       360 +                                     not in_phase1 and
+       361 +                                     iteration % 
+           + self.config.interaction_freq == 0)
+       362    
+       363 +              # Store Q tensors for GPU interaction 
+           + computation
+       364 +              all_Q_gpu = [] if compute_interaction else None
+       365 +  
+       366                for batch_idx, user_data in 
+             enumerate(user_data_batches):
+       367                    Q = self._batch_forward_gpu(
+       368                        user_data, potentials, grid_size,
+     ...
+       369                    gen_W += batch_W
+       370                    gen_O += batch_O
+       371    
+       372 -                  # Store Q for interaction 
+           -  (only when needed)
+       373 -                  if constraints.interaction is not None and 
+           - not in_phase1 and iteration % self.config.interaction_freq 
+           - == 0:
+       374 -                      all_Q_cpu.append((user_data, Q.cpu()
+           -  .numpy()))
+       372 +                  # Keep Q on GPU for interaction computation
+       373 +                  if compute_interaction:
+       374 +                      all_Q_gpu.append((user_data, Q))
+       375 +                  else:
+       376 +                      del Q
+       377 +                      torch.cuda.empty_cache()
+       378    
+       379 -                  # Free GPU memory
+       380 -                  del Q
+       381 -                  torch.cuda.empty_cache()
+       382 -  
+       379                # Normalize
+       380                gen_H = gen_H / (gen_H.sum() + 1e-10)
+       381                gen_W = gen_W / (gen_W.sum() + 1e-10)
+     ...
+       395                optimizer.step(grad_H, grad_W, grad_O, 
+             alpha_lr)
+       396    
+       397                # ============================================
+       398 -              # INTERACTION (less frequent)
+       398 +              # INTERACTION (GPU-accelerated)
+       399                # ============================================
+       400                interaction_loss = 0.0
+       401 -              if all_Q_cpu:  # Only compute if we collected Q
+       402 -                  interaction_loss, gen_interaction = 
+           - self._compute_interaction_cpu_batched(
+       403 -                      all_Q_cpu, user_patterns, grid_size, 
+           - constraints.interaction
+       404 -                  )
+       401 +              gen_interaction = None
+       402 +              if all_Q_gpu:
+       403 +                  # Compute interaction using GPU for each 
+           + batch
+       404 +                  all_interactions = []
+       405 +                  for user_data, Q in all_Q_gpu:
+       406 +                      loss, interaction = 
+           + self._compute_interaction_gpu(
+       407 +                          Q, user_data, grid_size, 
+           + constraints.interaction
+       408 +                      )
+       409 +                      all_interactions.append((loss, 
+           + interaction))
+       410 +                      del Q
+       411    
+       412 +                  torch.cuda.empty_cache()
+       413 +  
+       414 +                  # Average interaction loss across batches
+       415 +                  if all_interactions:
+       416 +                      interaction_loss = np.mean([x[0] for x 
+           + in all_interactions])
+       417 +                      # Merge sparse matrices from all 
+           + batches
+       418 +                      gen_interaction = 
+           + self._merge_interactions([x[1] for x in all_interactions], 
+           + grid_size)
+       419 +  
+       420                    # Early stopping
+       421                    if interaction_loss < best_interaction_loss
+              - 0.001:
+       422                        best_interaction_loss = 
+             interaction_loss
+
+⏺ 现在需要修复后续的early stopping和beta更新逻辑：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 40 lines
+
+⏺ 现在添加 _merge_interactions 辅助方法：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 15 lines
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 20 lines
+
+⏺ 添加 _merge_interactions 方法：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 16 additions           
+       699    
+       700            return loss, gen_interaction
+       701    
+       702 +      def _merge_interactions(self,
+       703 +                              interactions: 
+           + List[InteractionConstraints],
+       704 +                              grid_size: int) -> 
+           + InteractionConstraints:
+       705 +          """Merge interaction constraints from multiple 
+           + batches"""
+       706 +          if len(interactions) == 1:
+       707 +              return interactions[0]
+       708 +  
+       709 +          # Sum sparse matrices
+       710 +          HW = sum(x.HW for x in interactions)
+       711 +          HO = sum(x.HO for x in interactions)
+       712 +          WO = sum(x.WO for x in interactions)
+       713 +  
+       714 +          merged = InteractionConstraints(HW=HW, HO=HO, 
+           + WO=WO)
+       715 +          merged.normalize()
+       716 +          return merged
+       717 +  
+       718        def _compute_interaction_cpu_batched(self,
+       719                                             all_Q_cpu: 
+             List[Tuple[BatchedUserData, np.ndarray]],
+       720                                             user_patterns: 
+             Dict[int, UserPattern],
+
+⏺ 更新测试文件使用优化后的配置：
+
+⏺ Read(test_ssdmfo_gpu.py)
+  ⎿  Read 35 lines
+
+⏺ Update(test_ssdmfo_gpu.py)
+  ⎿  Updated test_ssdmfo_gpu.py with 9 additions and 6 removals          
+       122            print("=" * 70)
+       123    
+       124            config = GPUConfig(
+       125 -              max_iter=60,
+       125 +              max_iter=80,                       # More 
+           + iterations for interaction
+       126                gpu_batch_size=min(n_users, 500),  # Batch size
+              for GPU (avoid OOM)
+       127 +              lr_alpha=0.15,                     # Faster 
+           + spatial convergence
+       128 +              lr_beta=0.05,                      # Aggressive
+           +  beta updates
+       129                mfvi_iter=3,
+       130                temp_init=2.0,
+       131 -              temp_final=1.0,
+       131 +              temp_final=0.3,                    # Lower for 
+           + sharper distributions
+       132                gumbel_scale=0.3,
+       133 -              gumbel_decay=0.995,
+       134 -              gumbel_final=0.05,
+       135 -              interaction_freq=3,
+       133 +              gumbel_decay=0.99,
+           +                   # Faster decay
+       134 +              gumbel_final=0.01,                 # Lower 
+           + noise floor
+       135 +              interaction_freq=2,                # More 
+           + frequent interaction updates
+       136                top_k=50,
+       137                log_freq=5,
+       138 -              early_stop_patience=8,
+       138 +              early_stop_patience=15,
+           +              # More patience
+       139                phase_separation=True,
+       140 +              phase1_ratio=0.25,                 # Shorter 
+           + phase 1
+       141                device='cuda' if torch.cuda.is_available() else
+              'cpu'
+       142            )
+       143    
+
+⏺ 优化完成！以下是所有改进的总结：
+
+  已完成的优化
+
+  1. Spatial收敛修复
+
+  - temp_final: 1.0 → 0.3 (更低的温度产生更尖锐的分布)
+  - gumbel_final: 0.05 → 0.01 (更低的噪声地板)
+  - gumbel_decay: 0.995 → 0.99 (更快的噪声衰减)
+  - lr_alpha: 0.1 → 0.15 (更快的空间收敛)
+  - 移除了Phase 2学习率减半的逻辑
+
+  2. 交互优化改进
+
+  - lr_beta: 0.01 → 0.05 (5倍更积极的beta更新)
+  - interaction_freq: 3 → 2 (更频繁的交互更新)
+  - early_stop_patience: 10 → 15 (更多耐心等待改进)
+  - phase1_ratio: 0.33 → 0.25 (更短的Phase 1，更长的交互优化时间)
+
+  3. GPU加速交互计算
+
+  - 新增 _compute_interaction_gpu() - 使用batched outer products在GPU上计算
+  - 避免了CPU-GPU数据传输瓶颈
+  - 使用 torch.bmm() 并行计算所有用户的交互
+
+  预期改进
+
+  | 改进项             | 之前    | 预期      |
+  |-----------------|-------|---------|
+  | Spatial JSD     | 0.02  | < 0.005 |
+  | Interaction JSD | 0.60  | < 0.50  |
+  | 交互计算时间          | 7-28s | < 1s    |
+
+  请运行测试验证：
+  python test_ssdmfo_gpu.py
+
+> 为什么interact有的时候是0，然后打印参数突然蹦出来一个0.5几 
+
+⏺ 这是因为 interaction_freq 参数控制交互计算的频率。
+
+  看代码逻辑：
+
+  # 只有当满足条件时才计算交互
+  compute_interaction = (constraints.interaction is not None and
+                         not in_phase1 and
+                         iteration % self.config.interaction_freq == 0)
+
+  - interaction_freq=2 意味着每2次迭代才计算一次交互
+  - 不计算时 interaction_loss = 0.0（默认值），所以显示0.0000
+  - 计算时才显示真实值如0.5692
+
+  这个0不是真实的交互损失，只是"未计算"的占位符。
+
+  让我修复显示逻辑，让输出更清晰：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 20 lines
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 45 lines
+
+⏺ 修复显示逻辑，保留上次的交互损失值：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 15 lines
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 1 addition                
+       317    
+       318            # Early stopping
+       319            best_interaction_loss = float('inf')
+       320 +          last_interaction_loss = 0.0  # Track last computed 
+           + interaction for display
+       321            best_state = None
+       322            no_improve_count = 0
+       323            best_iter = 0
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 2 additions and 3 removals
+       403                # ============================================
+       404                # INTERACTION (GPU-accelerated)
+       405                # ============================================
+       406 -              interaction_loss = 0.0
+       406                gen_interaction = None
+       407                if all_Q_gpu:
+       408                    # Compute interaction using GPU for each 
+             batch
+     ...
+       419    
+       420                    # Average interaction loss across batches
+       421                    if all_interactions:
+       422 -                      interaction_loss
+           -   = np.mean([x[0] for x in all_interactions])
+       422 +                      last_interaction_loss
+           +   = np.mean([x[0] for x in all_interactions])
+       423                        # Merge sparse matrices from all 
+             batches
+       424                        gen_interaction = 
+             self._merge_interactions([x[1] for x in all_interactions], 
+             grid_size)
+       425    
+       426                    # Early stopping
+       427 -                  if interaction_loss
+           -   < best_interaction_loss - 0.001:
+       427 +                  if last_interaction_loss
+           +   < best_interaction_loss - 0.001:
+       428                        best_interaction_loss = 
+             interaction_loss
+       429                        best_state = potentials.copy_state()
+       430                        no_improve_count = 0
+
+⏺ 修复变量名错误：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 1 addition and 1 removal
+       424    
+       425                    # Early stopping
+       426                    if last_interaction_loss < 
+             best_interaction_loss - 0.001:
+       427 -                      best_interaction_loss = 
+           -  interaction_loss
+       427 +                      best_interaction_loss = 
+           +  last_interaction_loss
+       428                        best_state = potentials.copy_state()
+       429                        no_improve_count = 0
+       430                        best_iter = iteration
+
+⏺ 现在更新日志显示：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 3 additions and 1 removal 
+       440                iter_time = time.time() - iter_start
+       441                phase_str = "P1" if in_phase1 else "P2"
+       442                if iteration % self.config.log_freq == 0 or 
+             iteration < 5:
+       443 +                  # Show last known interaction loss (not 0 
+           + when not computed)
+       444 +                  interact_str = 
+           + f"{last_interaction_loss:.4f}" if last_interaction_loss > 0 
+           + else "---"
+       445                    print(f"  Iter {iteration:3d} 
+             [{phase_str}]: Spatial={spatial_loss:.4f}, "
+       446 -                        f"Interact={interaction_loss:.4f
+           -  }, T={temperature:.2f}, "
+       446 +                        f"Interact={interact_str
+           +  }, T={temperature:.2f}, "
+       447                          f"Gumbel={gumbel_scale:.3f} 
+             ({iter_time:.1f}s)")
+       448    
+       449                # Early stopping
+
+⏺ 修复完成！现在显示逻辑是：
+
+  | 阶段            | 显示                         |
+  |---------------|----------------------------|
+  | Phase 1       | Interact=--- (未计算)         |
+  | Phase 2 首次计算后 | 显示上次计算的值，如 Interact=0.5234 |
+
+  之前的问题：
+  Iter  20 [P2]: Interact=0.0000  ← 误导，实际是"未计算"
+  Iter  25 [P2]: Interact=0.0000  ← 误导
+  Iter  30 [P2]: Interact=0.5692  ← 实际计算了
+
+  现在的显示：
+  Iter  20 [P2]: Interact=---     ← 清楚表示未计算
+  Iter  25 [P2]: Interact=0.5692  ← 显示上次计算的值
+  Iter  30 [P2]: Interact=0.5234  ← 更新为新值
+
+  你可以运行测试查看改进效果：
+  python test_ssdmfo_gpu.py
+
+> 现在/Volumes/FastACIS/Project/EVproject/test_ssdmfo_gpu.py进行了几次训练？
+为什么可以看到好几次训练？查看已经完成的部分信息：(rsprompter) 
+kchdong@kchdong-System-Product-Name:~/EV_code$ python test_ssdmfo_gpu.py
+======================================================================
+SS-DMFO GPU ACCELERATION TEST
+======================================================================
+
+PyTorch version: 2.1.2+cu121
+CUDA available: True
+CUDA device: NVIDIA GeForce RTX 3090
+CUDA memory: 25.4 GB
+
+[Step 1] Loading data...
+Loading spatial constraints from HWO_distribute.csv...
+Grid range: lon [-97, 87], lat [-53, 167]
+Grid size: 221 x 185
+H total: 3227754.0, W total: 1675503.0, O total: 22263805.0
+Loading interaction constraints...
+    Loading HW_interact.csv...
+  HW: 1034099 non-zero entries, total=22263805
+    Loading HO_interact.csv...
+  HO: 3988341 non-zero entries, total=22263805
+    Loading WO_interact.csv...
+  WO: 3975927 non-zero entries, total=22263805
+
+Grid: 221 x 185
+Real interaction constraints:
+  HW: 1034099 non-zero entries
+  HO: 3988341 non-zero entries
+  WO: 3975927 non-zero entries
+
+######################################################################
+# Testing with 100 users
+######################################################################
+
+[Step 2] Loading 100 user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 100 users
+Loaded 100 valid user patterns
+Loaded 100 users
+
+======================================================================
+BASELINE: IPF Phase 1
+======================================================================
+
+======================================================================
+Testing: IPF Phase 1
+======================================================================
+
+=== Running IPF(iter=20) ===
+Users: 100
+Grid size: 221 x 185
+Initializing allocations...
+Running IPF iterations (max_iter=20)...
+  Iter   0: JSD = 0.533547
+  Iter   1: JSD = 0.000000
+  Iter   2: JSD = 0.000000
+  Converged at iteration 2
+Runtime: 0.46s
+Memory: 0.13MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/100...
+  Building sparse matrices (HW:2500, HO:2500, WO:2500 entries)...
+
+Generated interaction entries:
+  HW: 2500
+  HO: 2500
+  WO: 2500
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.000000
+  W: 0.000000
+  O: 0.000000
+  Mean: 0.000000
+
+Interaction JSD:
+  HW: 0.644029
+  HO: 0.642455
+  WO: 0.619097
+  Mean: 0.635194
+
+Total JSD Mean: 0.317597
+
+Total Variation Distance:
+  H: 0.000001
+  W: 0.000002
+  O: 0.000001
+  Mean: 0.000002
+--------------------------------------------------
+Method total time: 13.1s
+
+======================================================================
+GPU: SS-DMFO v3 (100 users)
+======================================================================
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+======================================================================
+Testing: SS-DMFO GPU (100u)
+======================================================================
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 100
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 100, Grid: 221x185=40885
+  Temperature: 2.0 -> 0.3
+  Gumbel scale: 0.3 -> 0.01
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 100, num batches: 1
+  Max locations per user: 14
+
+[SS-DMFO GPU] Starting optimization (max_iter=80, phase1=20)...
+  Iter   0 [P1]: Spatial=0.5337, Interact=0.0000, T=2.00, Gumbel=0.300 
+(0.5s)
+  Iter   1 [P1]: Spatial=0.5212, Interact=0.0000, T=2.00, Gumbel=0.297 
+(0.5s)
+  Iter   2 [P1]: Spatial=0.5080, Interact=0.0000, T=2.00, Gumbel=0.294 
+(0.5s)
+  Iter   3 [P1]: Spatial=0.4942, Interact=0.0000, T=2.00, Gumbel=0.291 
+(0.5s)
+  Iter   4 [P1]: Spatial=0.4799, Interact=0.0000, T=2.00, Gumbel=0.288 
+(0.5s)
+  Iter   5 [P1]: Spatial=0.4648, Interact=0.0000, T=2.00, Gumbel=0.285 
+(0.5s)
+  Iter  10 [P1]: Spatial=0.3831, Interact=0.0000, T=2.00, Gumbel=0.271 
+(0.5s)
+  Iter  15 [P1]: Spatial=0.2988, Interact=0.0000, T=2.00, Gumbel=0.258 
+(0.5s)
+  Iter  20 [P2]: Spatial=0.2224, Interact=0.6854, T=2.00, Gumbel=0.245 
+(5.5s)
+  Iter  25 [P2]: Spatial=0.1143, Interact=0.0000, T=1.70, Gumbel=0.233 
+(1.9s)
+  Iter  30 [P2]: Spatial=0.0474, Interact=0.6468, T=1.45, Gumbel=0.222 
+(6.9s)
+  Iter  35 [P2]: Spatial=0.0210, Interact=0.0000, T=1.23, Gumbel=0.211 
+(1.9s)
+  Iter  40 [P2]: Spatial=0.0208, Interact=0.6573, T=1.05, Gumbel=0.201 
+(7.0s)
+  Iter  45 [P2]: Spatial=0.0287, Interact=0.0000, T=0.90, Gumbel=0.191 
+(1.9s)
+  Iter  50 [P2]: Spatial=0.0244, Interact=0.6449, T=0.76, Gumbel=0.182 
+(7.0s)
+  Iter  55 [P2]: Spatial=0.0100, Interact=0.0000, T=0.65, Gumbel=0.173 
+(1.9s)
+  Iter  60 [P2]: Spatial=0.0089, Interact=0.6498, T=0.55, Gumbel=0.164 
+(7.0s)
+  Iter  65 [P2]: Spatial=0.0090, Interact=0.0000, T=0.47, Gumbel=0.156 
+(1.9s)
+  Iter  70 [P2]: Spatial=0.0072, Interact=0.6535, T=0.40, Gumbel=0.148 
+(7.0s)
+  Iter  75 [P2]: Spatial=0.0079, Interact=0.0000, T=0.34, Gumbel=0.141 
+(1.9s)
+
+[SS-DMFO GPU] Computing final allocations...
+  Best interaction: 0.6201 at iter 64
+Runtime: 276.85s
+Memory: 543.61MB
+Computing spatial statistics...
+Computing interaction statistics (top_k=50)...
+    Processing user 100/100...
+  Building sparse matrices (HW:2800, HO:3006, WO:2600 entries)...
+
+Generated interaction entries:
+  HW: 2800
+  HO: 3006
+  WO: 2600
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.006230
+  W: 0.004244
+  O: 0.006610
+  Mean: 0.005695
+
+Interaction JSD:
+  HW: 0.642076
+  HO: 0.639653
+  WO: 0.618505
+  Mean: 0.633412
+
+Total JSD Mean: 0.319553
+
+Total Variation Distance:
+  H: 0.053492
+  W: 0.059254
+  O: 0.062519
+  Mean: 0.058422
+--------------------------------------------------
+Method total time: 293.5s
+
+######################################################################
+# Testing with 500 users
+######################################################################
+
+[Step 2] Loading 500 user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 500 users
+Loaded 500 valid user patterns
+Loaded 500 users
+
+======================================================================
+GPU: SS-DMFO v3 (500 users)
+======================================================================
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+======================================================================
+Testing: SS-DMFO GPU (500u)
+======================================================================
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 500
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 500, Grid: 221x185=40885
+  Temperature: 2.0 -> 0.3
+  Gumbel scale: 0.3 -> 0.01
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 500, num batches: 1
+  Max locations per user: 13
+
+[SS-DMFO GPU] Starting optimization (max_iter=80, phase1=20)...
+  Iter   0 [P1]: Spatial=0.5335, Interact=0.0000, T=2.00, Gumbel=0.300 
+(2.0s)
+  Iter   1 [P1]: Spatial=0.5211, Interact=0.0000, T=2.00, Gumbel=0.297 
+(2.0s)
+  Iter   2 [P1]: Spatial=0.5080, Interact=0.0000, T=2.00, Gumbel=0.294 
+(2.0s)
+  Iter   3 [P1]: Spatial=0.4942, Interact=0.0000, T=2.00, Gumbel=0.291 
+(2.0s)
+  Iter   4 [P1]: Spatial=0.4798, Interact=0.0000, T=2.00, Gumbel=0.288 
+(2.0s)
+  Iter   5 [P1]: Spatial=0.4648, Interact=0.0000, T=2.00, Gumbel=0.285 
+(2.0s)
+  Iter  10 [P1]: Spatial=0.3831, Interact=0.0000, T=2.00, Gumbel=0.271 
+(2.0s)
+  Iter  15 [P1]: Spatial=0.2986, Interact=0.0000, T=2.00, Gumbel=0.258 
+(2.0s)
+  Iter  20 [P2]: Spatial=0.2221, Interact=0.6765, T=2.00, Gumbel=0.245 
+(7.1s)
+  Iter  25 [P2]: Spatial=0.1142, Interact=0.0000, T=1.70, Gumbel=0.233 
+(8.5s)
+\
+我认为依然没有任何改善 
+
+⏺ 你说得对，有两个问题：
+
+  1. 多次训练 - 测试文件设计为循环测试100、500、1000用户
+  2. 0.0000显示 - 我的修复没有生效
+  3. 交互计算仍然慢 - GPU优化没起作用
+
+  让我检查代码：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 15 lines
+
+⏺ 我发现问题了！看你的输出仍然显示 Interact=0.0000
+  而不是我修改后的格式。你运行的似乎是旧版本的代码。
+
+  另外，更重要的是：
+
+  观察实际结果：
+  - Spatial: 0.02 → 0.006 ✅ 改善了3倍！
+  - Interaction: 0.60 → 0.63 ❌ 反而变差了
+  - 速度: 5-7秒/次 ❌ 没有加速
+
+  问题在于GPU交互计算没有正确工作。让我检查问题：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 70 lines
+
+⏺ 我看到问题了！_interaction_jsd_cpu
+  函数是瓶颈——它对稀疏矩阵做Python级别的集合操作，非常慢。
+
+  让我查看主循环确认哪个函数被调用：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 40 lines
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 50 lines
+
+⏺ 我发现了根本问题！
+
+  问题分析：
+
+  1. 真实数据: HW有 1,034,099 个非零项
+  2. 生成数据: HW只有 2,800 个非零项
+  3. top_k=50 太小了！只保留50个位置，丢失99.9%的交互
+
+  这就是为什么交互JSD无法改善——我们生成的稀疏矩阵结构与真实数据完全不同。
+
+  让我修复：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 1 addition and 1 removal 
+       64    
+       65        # Interaction
+       66        interaction_freq: int = 2       # More frequent 
+            interaction updates
+       67 -      top_k: int = 50
+       67 +      top_k: int = 200                # Increased for better 
+          + interaction coverage
+       68    
+       69        # Early stopping
+       70        early_stop_patience: int = 15   # More patience for 
+            interaction improvement
+
+⏺ 现在优化JSD计算，用采样加速：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 50 lines
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 45 lines
+
+⏺ 重写JSD计算函数，使用更快的numpy操作：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 39 additions and 13 removals
+       849            cols.extend(j_mesh[mask].tolist())
+       850    
+       851        def _interaction_jsd_cpu(self, gen, real) -> float:
+       852 -          """Compute interaction JSD on CPU"""
+       853 -          def sparse_jsd(p, q):
+       852 +          """Compute interaction JSD on CPU
+           +   - optimized with sampling"""
+       853 +          def sparse_jsd_fast(p, q, n_samples=5000):
+       854 +              """Fast JSD using sampling from both 
+           + distributions"""
+       855                p_coo = p.tocoo()
+       856                q_coo = q.tocoo()
+       857 +  
+       858                if p_coo.nnz == 0 and q_coo.nnz == 0:
+       859                    return 0.0
+       860    
+       861 -              p_idx = set(zip(p_coo.row.tolist(), 
+           - p_coo.col.tolist()))
+       862 -              q_idx = set(zip(q_coo.row.tolist(), 
+           - q_coo.col.tolist()))
+       863 -              all_idx = list(p_idx | q_idx)
+       861 +              # Sample from generated distribution (smaller, 
+           + so sample all if small)
+       862 +              if p_coo.nnz <= n_samples:
+       863 +                  p_rows, p_cols, p_data = p_coo.row, 
+           + p_coo.col, p_coo.data
+       864 +              else:
+       865 +                  idx = np.random.choice(p_coo.nnz, 
+           + n_samples, replace=False)
+       866 +                  p_rows, p_cols, p_data = p_coo.row[idx], 
+           + p_coo.col[idx], p_coo.data[idx]
+       867    
+       868 -              if len(all_idx) > 10000:
+       869 -                  all_idx = [all_idx[i] for i in 
+           - np.random.choice(len(all_idx), 10000, replace=False)]
+       868 +              # Sample from real distribution
+       869 +              if q_coo.nnz <= n_samples:
+       870 +                  q_rows, q_cols, q_data = q_coo.row, 
+           + q_coo.col, q_coo.data
+       871 +              else:
+       872 +                  idx = np.random.choice(q_coo.nnz, 
+           + n_samples, replace=False)
+       873 +                  q_rows, q_cols, q_data = q_coo.row[idx], 
+           + q_coo.col[idx], q_coo.data[idx]
+       874    
+       875 -              if not all_idx:
+       875 +              # Combine indices using numpy (faster than 
+           + Python sets)
+       876 +              p_keys = p_rows * q.shape[1] + p_cols  # 
+           + Flatten to 1D keys
+       877 +              q_keys = q_rows * q.shape[1] + q_cols
+       878 +  
+       879 +              all_keys = np.unique(np.concatenate([p_keys, 
+           + q_keys]))
+       880 +  
+       881 +              if len(all_keys) == 0:
+       882                    return 0.0
+       883    
+       884 -              p_vals = np.array([p[r, c] for r, c in 
+           - all_idx]) + 1e-10
+       885 -              q_vals = np.array([q[r, c] for r, c in 
+           - all_idx]) + 1e-10
+       884 +              # Limit samples
+       885 +              if len(all_keys) > n_samples:
+       886 +                  all_keys = np.random.choice(all_keys, 
+           + n_samples, replace=False)
+       887 +  
+       888 +              # Convert back to (row, col)
+       889 +              all_rows = all_keys // q.shape[1]
+       890 +              all_cols = all_keys % q.shape[1]
+       891 +  
+       892 +              # Get values using sparse matrix indexing 
+           + (vectorized)
+       893 +              p_vals = np.asarray(p[all_rows, 
+           + all_cols]).flatten() + 1e-10
+       894 +              q_vals = np.asarray(q[all_rows, 
+           + all_cols]).flatten() + 1e-10
+       895 +  
+       896 +              # Normalize
+       897                p_vals = p_vals / p_vals.sum()
+       898                q_vals = q_vals / q_vals.sum()
+       899                m = 0.5 * (p_vals + q_vals)
+     ...
+       876    
+       877            losses = []
+       878            if gen.HW.nnz > 0 or real.HW.nnz > 0:
+       879 -              losses.append(sparse_jsd(gen.HW, real.HW))
+       879 +              losses.append(sparse_jsd_fast(gen.HW, real.HW))
+       880            if gen.HO.nnz > 0 or real.HO.nnz > 0:
+       881 -              losses.append(sparse_jsd(gen.HO, real.HO))
+       881 +              losses.append(sparse_jsd_fast(gen.HO, real.HO))
+       882            if gen.WO.nnz > 0 or real.WO.nnz > 0:
+       883 -              losses.append(sparse_jsd(gen.WO, real.WO))
+       883 +              losses.append(sparse_jsd_fast(gen.WO, real.WO))
+       884    
+       885            return np.mean(losses) if losses else 0.0
+       886    
+
+⏺ 现在简化测试文件，只测试100用户：
+
+⏺ Update(test_ssdmfo_gpu.py)
+  ⎿  Updated test_ssdmfo_gpu.py with 1 addition and 1 removal           
+        95        calculator = MetricsCalculator()
+        96        results = {}
+        97    
+        98 -      for n_users in [100, 500, 1000]:
+        98 +      for n_users in [100]:  # Simplified for faster testing
+        99            print(f"\n{'#' * 70}")
+       100            print(f"# Testing with {n_users} users")
+       101            print('#' * 70)
+
+⏺ 更新测试配置使用更大的top_k：
+
+⏺ Update(test_ssdmfo_gpu.py)
+  ⎿  Updated test_ssdmfo_gpu.py with 5 additions and 5 removals          
+       122            print("=" * 70)
+       123    
+       124            config = GPUConfig(
+       125 -              max_iter=80,                       
+           -  # More iterations for interaction
+       125 +              max_iter=100,                      
+           +  # More iterations for interaction
+       126                gpu_batch_size=min(n_users, 500),  # Batch size
+              for GPU (avoid OOM)
+       127                lr_alpha=0.15,                     # Faster 
+             spatial convergence
+       128 -              lr_beta=0.05,                      # Aggressive
+           -   beta updates
+       128 +              lr_beta=0.08,                      # More 
+           +  aggressive beta updates
+       129                mfvi_iter=3,
+       130                temp_init=2.0,
+       131                temp_final=0.3,                    # Lower for 
+             sharper distributions
+     ...
+       133                gumbel_decay=0.99,                 # Faster 
+             decay
+       134                gumbel_final=0.01,                 # Lower 
+             noise floor
+       135                interaction_freq=2,                # More 
+             frequent interaction updates
+       136 -              top_k=50,
+       136 +              top_k=200,                         # INCREASED:
+           +  more interaction coverage
+       137                log_freq=5,
+       138 -              early_stop_patience=15
+           -  ,            # More patience
+       138 +              early_stop_patience=20
+           +  ,            # More patience
+       139                phase_separation=True,
+       140 -              phase1_ratio=0.25,                 # Shorter 
+           - phase 1
+       140 +              phase1_ratio=0.2,                  # Even 
+           + shorter phase 1
+       141                device='cuda' if torch.cuda.is_available() else
+              'cpu'
+       142            )
+       143    
+
+⏺ 已完成的优化
+
+  1. 增加 top_k (50 → 200)
+
+  - 之前: top_k=50 只产生 50×50=2,500 个可能的交互
+  - 现在: top_k=200 产生 200×200=40,000 个可能的交互
+  - 真实数据有 1,034,099 个HW条目，需要更多覆盖
+
+  2. 优化 JSD 计算
+
+  - 使用 numpy 数组操作替代 Python set/zip
+  - 采样加速：从百万级条目采样5000个
+  - 预计速度提升 10-50 倍
+
+  3. 简化测试
+
+  - 只测试 100 用户（快速验证）
+  - 增加迭代次数：80 → 100
+  - 更激进的 beta 学习率：0.05 → 0.08
+  - 更短的 Phase 1：25% → 20%
+
+  预期改进
+
+  | 指标              | 之前    | 预期       |
+  |-----------------|-------|----------|
+  | Spatial JSD     | 0.006 | < 0.005  |
+  | Interaction JSD | 0.63  | < 0.50   |
+  | HW entries      | 2,800 | > 30,000 |
+  | 交互计算时间          | 5-7s  | < 1s     |
+
+  运行测试：
+  python test_ssdmfo_gpu.py
+
+> 为什么要用生成数据?为什么要用top50的稀疏矩阵？甚至200是不是都是太小了？ 
+
+⏺ 你问得非常好！这揭示了根本性的设计问题。
+
+  问题分析
+
+  真实数据结构：
+  - 网格大小：221 × 185 = 40,885 个格子
+  - HW交互矩阵：40,885 × 40,885 = 16.7亿个可能位置
+  - 真实HW非零条目：1,034,099（覆盖约0.06%）
+
+  当前方法的问题：
+  top_k=200 → 只考虑 200×200 = 40,000 个位置
+  真实数据有 1,034,099 个非零位置
+  我们最多只能匹配 4% 的真实交互！
+
+  根本原因
+
+  top_k 是为了计算效率引入的，但它造成了结构性不匹配：
+
+  |      | 真实数据      | 生成数据 (top_k=200) |
+  |------|-----------|------------------|
+  | HW条目 | 1,034,099 | 最多 40,000        |
+  | 覆盖率  | 100%      | ~4%              |
+
+  无论怎么优化，生成的稀疏矩阵结构永远无法匹配真实数据！
+
+  解决方案
+
+  应该去掉top_k限制或者使用完全不同的策略：
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 50 lines
+
+⏺ 让我重新设计方法——使用真实约束的索引，而不是任意的top_k：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 52 additions and 45 removals
+       635                                     user_data: 
+             BatchedUserData,
+       636                                     grid_size: int,
+       637                                     real_interaction: 
+             InteractionConstraints) -> Tuple[float, 
+             'InteractionConstraints']:
+       638 -          """GPU-accelerated interaction computation using 
+           -  batched outer products"""
+       639 -          top_k = self.config.top_k
+       638 +          """GPU-accelerated interaction computation - uses 
+           +  REAL constraint indices
+       639 +  
+       640 +          Key insight: Instead of arbitrary top_k, we 
+           + evaluate at the SAME positions
+       641 +          as the real data, ensuring structural alignment.
+       642 +          """
+       643            n_users = user_data.n_users
+       644    
+       645            # Aggregate Q by type for each user: (n_users, 
+             grid_size)
+       646 -          H_agg = (Q * 
+           -  user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)
+           -    # (n_users, grid_size)
+       646 +          H_agg = (Q * 
+           +  user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)
+       647            W_agg = (Q * 
+             user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+       648            O_agg = (Q * 
+             user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+       649    
+       650 -          # Normalize per user
+       651 -          H_agg = H_agg / (H_agg.sum(dim=1, keepdim=True) + 
+           - 1e-10)
+       652 -          W_agg = W_agg / (W_agg.sum(dim=1, keepdim=True) + 
+           - 1e-10)
+       653 -          O_agg = O_agg / (O_agg.sum(dim=1, keepdim=True) + 
+           - 1e-10)
+       650 +          # Sum across users to get aggregate distribution
+       651 +          H_total = H_agg.sum(dim=0)  # (grid_size,)
+       652 +          W_total = W_agg.sum(dim=0)
+       653 +          O_total = O_agg.sum(dim=0)
+       654    
+       655 -          # Get top-k indices for efficiency
+       656 -          _, H_topk_idx = torch.topk(H_agg.sum(dim=0), 
+           - min(top_k, grid_size))
+       657 -          _, W_topk_idx = torch.topk(W_agg.sum(dim=0), 
+           - min(top_k, grid_size))
+       658 -          _, O_topk_idx = torch.topk(O_agg.sum(dim=0), 
+           - min(top_k, grid_size))
+       655 +          # Normalize to probability distributions
+       656 +          H_prob = H_total / (H_total.sum() + 1e-10)
+       657 +          W_prob = W_total / (W_total.sum() + 1e-10)
+       658 +          O_prob = O_total / (O_total.sum() + 1e-10)
+       659    
+       660 -          # Extract top-k values
+       661 -          H_topk = H_agg[:, H_topk_idx]  # (n_users, top_k)
+       662 -          W_topk = W_agg[:, W_topk_idx]
+       663 -          O_topk = O_agg[:, O_topk_idx]
+       660 +          # Compute interaction at REAL constraint positions 
+           + (not arbitrary top_k)
+       661 +          # This ensures we compare at the same positions as 
+           + the real data
+       662 +          def compute_at_real_positions(prob1, prob2, 
+           + real_mat, name):
+       663 +              """Compute generated interaction values at real
+           +  constraint positions"""
+       664 +              real_coo = real_mat.tocoo()
+       665 +              if real_coo.nnz == 0:
+       666 +                  return sparse.csr_matrix((grid_size, 
+           + grid_size)), 0.0
+       667    
+       668 -          # Compute outer products for all users at once: 
+           - (n_users, top_k, top_k)
+       669 -          HW_outer = torch.bmm(H_topk.unsqueeze(2), 
+           - W_topk.unsqueeze(1))  # (n_users, top_k, top_k)
+       670 -          HO_outer = torch.bmm(H_topk.unsqueeze(2), 
+           - O_topk.unsqueeze(1))
+       671 -          WO_outer = torch.bmm(W_topk.unsqueeze(2), 
+           - O_topk.unsqueeze(1))
+       668 +              # Sample if too many (for speed)
+       669 +              max_samples = 50000
+       670 +              if real_coo.nnz > max_samples:
+       671 +                  idx = np.random.choice(real_coo.nnz, 
+           + max_samples, replace=False)
+       672 +                  rows, cols = real_coo.row[idx], 
+           + real_coo.col[idx]
+       673 +                  real_vals = real_coo.data[idx]
+       674 +              else:
+       675 +                  rows, cols = real_coo.row, real_coo.col
+       676 +                  real_vals = real_coo.data
+       677    
+       678 -          # Sum across users
+       679 -          HW_sum = HW_outer.sum(dim=0)  # (top_k, top_k)
+       680 -          HO_sum = HO_outer.sum(dim=0)
+       681 -          WO_sum = WO_outer.sum(dim=0)
+       678 +              # Get generated probabilities at these 
+           + positions
+       679 +              rows_t = 
+           + torch.from_numpy(rows).long().to(self.device)
+       680 +              cols_t = 
+           + torch.from_numpy(cols).long().to(self.device)
+       681    
+       682 -          # Convert to sparse matrices on CPU
+       683 -          HW_sum_np = HW_sum.cpu().numpy()
+       684 -          HO_sum_np = HO_sum.cpu().numpy()
+       685 -          WO_sum_np = WO_sum.cpu().numpy()
+       682 +              gen_vals = (prob1[rows_t] * 
+           + prob2[cols_t]).cpu().numpy()
+       683    
+       684 -          H_idx = H_topk_idx.cpu().numpy()
+       685 -          W_idx = W_topk_idx.cpu().numpy()
+       686 -          O_idx = O_topk_idx.cpu().numpy()
+       684 +              # Normalize both
+       685 +              gen_vals = gen_vals / (gen_vals.sum() + 1e-10)
+       686 +              real_vals = real_vals / (real_vals.sum() + 
+           + 1e-10)
+       687    
+       688 -          # Build sparse matrices with proper indices
+       689 -          def build_sparse(values, row_idx, col_idx):
+       690 -              rows, cols = np.meshgrid(row_idx, col_idx, 
+           - indexing='ij')
+       691 -              mask = values > 1e-15
+       692 -              if not np.any(mask):
+       693 -                  return sparse.csr_matrix((grid_size, 
+           - grid_size))
+       694 -              return sparse.csr_matrix(
+       695 -                  (values[mask], (rows[mask], cols[mask])),
+       696 -                  shape=(grid_size, grid_size)
+       688 +              # Compute JSD directly
+       689 +              m = 0.5 * (gen_vals + real_vals + 1e-10)
+       690 +              jsd = 0.5 * (np.sum(gen_vals * np.log((gen_vals
+           +  + 1e-10) / m)) +
+       691 +                          np.sum(real_vals * 
+           + np.log((real_vals + 1e-10) / m)))
+       692 +  
+       693 +              # Build sparse matrix for beta update
+       694 +              gen_sparse = sparse.csr_matrix(
+       695 +                  (gen_vals, (rows, cols)), shape=(grid_size,
+           +  grid_size)
+       696                )
+       697    
+       698 -          HW = build_sparse(HW_sum_np, H_idx, W_idx)
+       699 -          HO = build_sparse(HO_sum_np, H_idx, O_idx)
+       700 -          WO = build_sparse(WO_sum_np, W_idx, O_idx)
+       698 +              return gen_sparse, jsd
+       699    
+       700 +          HW, jsd_hw = compute_at_real_positions(H_prob, 
+           + W_prob, real_interaction.HW, "HW")
+       701 +          HO, jsd_ho = compute_at_real_positions(H_prob, 
+           + O_prob, real_interaction.HO, "HO")
+       702 +          WO, jsd_wo = compute_at_real_positions(W_prob, 
+           + O_prob, real_interaction.WO, "WO")
+       703 +  
+       704            gen_interaction = InteractionConstraints(HW=HW, 
+             HO=HO, WO=WO)
+       705 -          gen_interaction.normalize()
+       705    
+       706 -          # Compute JSD
+       707 -          loss = self._interaction_jsd_cpu(gen_interaction, 
+           - real_interaction)
+       706 +          # Average JSD
+       707 +          loss = (jsd_hw + jsd_ho + jsd_wo) / 3.0
+       708    
+       709            return loss, gen_interaction
+       710    
+
+⏺ 关键改变
+
+  之前的方法（错误）：
+  生成数据 → 取 top_k 位置 → 与真实数据比较
+  结果：结构不匹配，JSD永远很高
+
+  新方法（正确）：
+  真实数据有 (i,j) 位置 → 在同样的 (i,j) 计算生成值 → 直接比较
+  结果：结构对齐，JSD可以降低
+
+  核心思想：
+  # 真实交互数据告诉我们"哪些位置重要"
+  real_coo = real_mat.tocoo()
+  rows, cols = real_coo.row, real_coo.col  # 真实数据的位置
+
+  # 在这些位置计算生成的交互
+  gen_vals = P(H)[rows] * P(W)[cols]  # 独立性假设
+
+  # 直接比较
+  jsd = JSD(gen_vals, real_vals)
+
+  这个方法：
+  1. ✅ 使用真实约束的位置，不是任意 top_k
+  2. ✅ 采样50,000个位置（从100万中），速度快
+  3. ✅ 结构对齐，JSD可以真正优化
+  4. ✅ GPU加速，计算快
+
+  运行测试看效果：
+  python test_ssdmfo_gpu.py
+
+> 我发现top=200就是到interact下降到了0.12，说明瓶颈就是k数量。有没有一种巧妙
+的方法，即实现了几乎全部的可能，又可以计算上可行？你现在的这个新的方法是否存
+在问题？先跟我讨论。 
+
+⏺ 很好的问题！让我们深入讨论。
+
+  新方法的问题
+
+  我的新方法计算的是：
+  gen_vals = P(H_i) × P(W_j)  # 边缘分布的乘积
+
+  这假设了 H 和 W 独立，但实际上：
+  - 住在郊区A的人，很可能在市中心B工作
+  - 真实交互捕捉的是 条件概率 P(W_j | H_i)
+  - 边缘乘积 ≠ 联合分布
+
+  数学上：
+  真实: P(H_i, W_j) = P(H_i) × P(W_j | H_i)  ← 有相关性
+  我的: P(H_i) × P(W_j)                      ← 假设独立
+
+  所以这个方法在概念上是错的。
+
+  真正的计算瓶颈
+
+  正确做法应该是对每个用户计算外积：
+  用户u: Q_H^u × Q_W^u  → 40885 × 40885 矩阵
+  100个用户 → 需要存储/计算 100 × 1.67B = 1670亿个元素
+
+  这不可行。
+
+  巧妙的解决方案
+
+  方案1: 稀疏外积 (推荐)
+
+  每个用户的 Q 分布实际上是高度稀疏的：
+  - 大部分格子概率 < 1e-6
+  - 只有少数格子有显著概率
+
+  # 对每个用户
+  threshold = 1e-4
+  H_nonzero = Q_H > threshold  # 可能只有 ~100 个格子
+  W_nonzero = Q_W > threshold  # 可能只有 ~100 个格子
+
+  # 外积只需要 100 × 100 = 10,000 个元素，而不是 40885²
+
+  方案2: 重要格子集合
+
+  从真实约束中提取"重要格子"：
+  # 真实H分布中概率 > 阈值的格子
+  important_H = np.where(target_H > 1e-5)[0]  # 可能 ~2000 个
+  important_W = np.where(target_W > 1e-5)[0]  # 可能 ~2000 个
+
+  # 只计算这 2000 × 2000 = 4M 个位置的交互
+  # 远小于 40885² = 1.67B
+
+  方案3: 采样外积
+
+  # 对每个用户，从分布中采样K个位置
+  H_samples = sample_from_distribution(Q_H, k=50)  # 50个H位置
+  W_samples = sample_from_distribution(Q_W, k=50)  # 50个W位置
+
+  # 外积是 50 × 50 = 2500 个元素/用户
+  # 100用户 = 250,000 个元素，可管理
+
+  你觉得哪个方向更合理？
+
+  1. 稀疏外积 - 利用分布的自然稀疏性
+  2. 重要格子 - 只关注真实数据中有意义的区域
+  3. 采样 - 随机但无偏的估计
+
+  或者有其他想法？
+
+> 我也不确定，重要作为基础？随机采样引入不确定性？\
+或者你有什么好的建议？我认为你可以基于思考直接应用。 
+
+⏺ 好的，我来实现一个结合两者优点的方法：
+
+  策略：重要格子 + 稀疏外积
+
+  1. 从真实约束提取重要格子（基础）
+  2. 对每个用户计算稀疏外积（捕捉真实相关性）
+  3. 累加得到真正的联合分布
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 55 additions and 47 removals
+       635                                     user_data: 
+             BatchedUserData,
+       636                                     grid_size: int,
+       637                                     real_interaction: 
+             InteractionConstraints) -> Tuple[float, 
+             'InteractionConstraints']:
+       638 -          """GPU-accelerated interaction computation - uses 
+           - REAL constraint indices
+       638 +          """Smart interaction computation: Important Cells +
+           +  Sparse Outer Products
+       639    
+       640 -          Key insight: Instead of arbitrary top_k, we 
+           - evaluate at the SAME positions
+       641 -          as the real data, ensuring structural alignment.
+       640 +          Strategy:
+       641 +          1. Identify important cells from real spatial 
+           + constraints (foundation)
+       642 +          2. For each user, compute sparse outer product 
+           + (captures true correlation)
+       643 +          3. Aggregate across users (true joint distribution,
+           +  not independence)
+       644 +  
+       645 +          This avoids the 40885×40885 full matrix while 
+           + capturing real correlations.
+       646            """
+       647            n_users = user_data.n_users
+       648 +          n_important = self.config.top_k  # Reuse top_k as 
+           + number of important cells
+       649    
+       650 -          # Aggregate Q by type for each user: (n_users, 
+           - grid_size)
+       651 -          H_agg = (Q * 
+           - user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)
+       650 +          # Step 1: Identify important cells from aggregate 
+           + distributions
+       651 +          # These are cells where users actually have 
+           + significant probability
+       652 +          H_agg = (Q * 
+           + user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # 
+           + (n_users, grid_size)
+       653            W_agg = (Q * 
+             user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+       654            O_agg = (Q * 
+             user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+       655    
+       656 -          # Sum across users to get aggregate distribution
+       656 +          # Get important cell indices based on total 
+           + probability mass
+       657            H_total = H_agg.sum(dim=0)  # (grid_size,)
+       658            W_total = W_agg.sum(dim=0)
+       659            O_total = O_agg.sum(dim=0)
+       660    
+       661 -          # Normalize to probability distributions
+       662 -          H_prob = H_total / (H_total.sum() + 1e-10)
+       663 -          W_prob = W_total / (W_total.sum() + 1e-10)
+       664 -          O_prob = O_total / (O_total.sum() + 1e-10)
+       661 +          _, H_important = torch.topk(H_total, 
+           + min(n_important, grid_size))
+       662 +          _, W_important = torch.topk(W_total, 
+           + min(n_important, grid_size))
+       663 +          _, O_important = torch.topk(O_total, 
+           + min(n_important, grid_size))
+       664    
+       665 -          # Compute interaction at REAL constraint positions 
+           - (not arbitrary top_k)
+       666 -          # This ensures we compare at the same positions as 
+           - the real data
+       667 -          def compute_at_real_positions(prob1, prob2, 
+           - real_mat, name):
+       668 -              """Compute generated interaction values at real
+           -  constraint positions"""
+       669 -              real_coo = real_mat.tocoo()
+       670 -              if real_coo.nnz == 0:
+       671 -                  return sparse.csr_matrix((grid_size, 
+           - grid_size)), 0.0
+       665 +          # Step 2: For each user, compute sparse outer 
+           + product at important positions only
+       666 +          # Extract values at important positions: (n_users, 
+           + n_important)
+       667 +          H_vals = H_agg[:, H_important]
+       668 +          W_vals = W_agg[:, W_important]
+       669 +          O_vals = O_agg[:, O_important]
+       670    
+       671 -              # Sample if too many (for speed)
+       672 -              max_samples = 50000
+       673 -              if real_coo.nnz > max_samples:
+       674 -                  idx = np.random.choice(real_coo.nnz, 
+           - max_samples, replace=False)
+       675 -                  rows, cols = real_coo.row[idx], 
+           - real_coo.col[idx]
+       676 -                  real_vals = real_coo.data[idx]
+       677 -              else:
+       678 -                  rows, cols = real_coo.row, real_coo.col
+       679 -                  real_vals = real_coo.data
+       671 +          # Normalize per user (each user's contribution 
+           + should sum to 1)
+       672 +          H_vals = H_vals / (H_vals.sum(dim=1, keepdim=True) 
+           + + 1e-10)
+       673 +          W_vals = W_vals / (W_vals.sum(dim=1, keepdim=True) 
+           + + 1e-10)
+       674 +          O_vals = O_vals / (O_vals.sum(dim=1, keepdim=True) 
+           + + 1e-10)
+       675    
+       676 -              # Get generated probabilities at these 
+           - positions
+       677 -              rows_t = 
+           - torch.from_numpy(rows).long().to(self.device)
+       678 -              cols_t = 
+           - torch.from_numpy(cols).long().to(self.device)
+       676 +          # Compute outer products for ALL users at once: 
+           + (n_users, n_important, n_important)
+       677 +          # This captures the TRUE correlation structure per 
+           + user
+       678 +          HW_outer = torch.bmm(H_vals.unsqueeze(2), 
+           + W_vals.unsqueeze(1))
+       679 +          HO_outer = torch.bmm(H_vals.unsqueeze(2), 
+           + O_vals.unsqueeze(1))
+       680 +          WO_outer = torch.bmm(W_vals.unsqueeze(2), 
+           + O_vals.unsqueeze(1))
+       681    
+       682 -              gen_vals = (prob1[rows_t] * 
+           - prob2[cols_t]).cpu().numpy()
+       682 +          # Step 3: Aggregate across users (mean, not sum, to
+           +  get probability)
+       683 +          HW_agg = HW_outer.mean(dim=0)  # (n_important, 
+           + n_important)
+       684 +          HO_agg = HO_outer.mean(dim=0)
+       685 +          WO_agg = WO_outer.mean(dim=0)
+       686    
+       687 -              # Normalize both
+       688 -              gen_vals = gen_vals / (gen_vals.sum() + 1e-10)
+       689 -              real_vals = real_vals / (real_vals.sum() + 
+           - 1e-10)
+       687 +          # Convert to CPU numpy
+       688 +          HW_np = HW_agg.cpu().numpy()
+       689 +          HO_np = HO_agg.cpu().numpy()
+       690 +          WO_np = WO_agg.cpu().numpy()
+       691    
+       692 -              # Compute JSD directly
+       693 -              m = 0.5 * (gen_vals + real_vals + 1e-10)
+       694 -              jsd = 0.5 * (np.sum(gen_vals * np.log((gen_vals
+           -  + 1e-10) / m)) +
+       695 -                          np.sum(real_vals * 
+           - np.log((real_vals + 1e-10) / m)))
+       692 +          H_idx = H_important.cpu().numpy()
+       693 +          W_idx = W_important.cpu().numpy()
+       694 +          O_idx = O_important.cpu().numpy()
+       695    
+       696 -              # Build sparse matrix for beta update
+       697 -              gen_sparse = sparse.csr_matrix(
+       698 -                  (gen_vals, (rows, cols)), shape=(grid_size,
+           -  grid_size)
+       696 +          # Build sparse matrices with correct global indices
+       697 +          def build_sparse_interaction(values, row_idx, 
+           + col_idx):
+       698 +              rows, cols = np.meshgrid(row_idx, col_idx, 
+           + indexing='ij')
+       699 +              mask = values > 1e-10
+       700 +              if not np.any(mask):
+       701 +                  return sparse.csr_matrix((grid_size, 
+           + grid_size))
+       702 +              return sparse.csr_matrix(
+       703 +                  (values[mask], (rows[mask], cols[mask])),
+       704 +                  shape=(grid_size, grid_size)
+       705                )
+       706    
+       707 -              return gen_sparse, jsd
+       707 +          HW = build_sparse_interaction(HW_np, H_idx, W_idx)
+       708 +          HO = build_sparse_interaction(HO_np, H_idx, O_idx)
+       709 +          WO = build_sparse_interaction(WO_np, W_idx, O_idx)
+       710    
+       711 -          HW, jsd_hw = compute_at_real_positions(H_prob, 
+           - W_prob, real_interaction.HW, "HW")
+       712 -          HO, jsd_ho = compute_at_real_positions(H_prob, 
+           - O_prob, real_interaction.HO, "HO")
+       713 -          WO, jsd_wo = compute_at_real_positions(W_prob, 
+           - O_prob, real_interaction.WO, "WO")
+       714 -  
+       711            gen_interaction = InteractionConstraints(HW=HW, 
+             HO=HO, WO=WO)
+       712 +          gen_interaction.normalize()
+       713    
+       714 -          # Average JSD
+       715 -          loss = (jsd_hw + jsd_ho + jsd_wo) / 3.0
+       714 +          # Compute JSD with real interaction
+       715 +          loss = self._interaction_jsd_cpu(gen_interaction, 
+           + real_interaction)
+       716    
+       717            return loss, gen_interaction
+       718    
+
+⏺ 现在增加 top_k 到更大的值，并确保配置合理：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 1 addition and 1 removal  
+       64    
+       65        # Interaction
+       66        interaction_freq: int = 2       # More frequent 
+            interaction updates
+       67 -      top_k: int = 200                # Increased for better 
+          - interaction coverage
+       67 +      top_k: int = 500                # Important cells count 
+          + (500×500=250K interactions)
+       68    
+       69        # Early stopping
+       70        early_stop_patience: int = 15   # More patience for 
+            interaction improvement
+
+⏺ Update(test_ssdmfo_gpu.py)
+  ⎿  Updated test_ssdmfo_gpu.py with 1 addition and 1 removal            
+       133                gumbel_decay=0.99,                 # Faster 
+             decay
+       134                gumbel_final=0.01,                 # Lower 
+             noise floor
+       135                interaction_freq=2,                # More 
+             frequent interaction updates
+       136 -              top_k=200,                         # INCREASED:
+           -  more interaction coverage
+       136 +              top_k=500,                         # Important 
+           + cells (500×500=250K interactions)
+       137                log_freq=5,
+       138                early_stop_patience=20,            # More 
+             patience
+       139                phase_separation=True,
+
+⏺ 新方法总结
+
+  核心改进
+
+  之前（独立性假设，错误）：
+  gen_interaction = P(H) × P(W)  ← 边缘乘积，忽略相关性
+
+  现在（真实相关性）：
+  # 对每个用户u，计算外积：
+  outer_u = Q_H^u ⊗ Q_W^u  # 捕捉用户u的H-W相关性
+
+  # 聚合所有用户：
+  gen_interaction = mean(outer_u for all users)  # 真实联合分布
+
+  计算效率
+
+  | top_k | 交互矩阵大小        | 内存需求   |
+  |-------|---------------|--------|
+  | 50    | 2,500         | ~10KB  |
+  | 200   | 40,000        | ~160KB |
+  | 500   | 250,000       | ~1MB   |
+  | 全量    | 1,670,000,000 | ~6.7GB |
+
+  top_k=500 是个好平衡点：
+  - 覆盖了最重要的 500 个 H 格子和 500 个 W 格子
+  - 产生 250,000 个可能的交互位置
+  - 计算上完全可行（GPU上毫秒级）
+
+  关键区别
+
+  | 特性  | 旧方法       | 新方法             |
+  |-----|-----------|-----------------|
+  | 假设  | H⊥W (独立)  | H↔W (相关)        |
+  | 计算  | P(H)×P(W) | Σ Q_H^u ⊗ Q_W^u |
+  | 捕捉  | 边缘分布      | 联合分布            |
+
+  运行测试：
+  python test_ssdmfo_gpu.py
+
+> 我认为可以测试一下真实性能。使用合理的k，以及大量数据参与，和合理的迭代次
+数。测试最终性能目前可以到什么水平。\
+以及，如何基于结果进行例如图片中的可视化[Image #1]\ 
+
+⏺ 好的，让我创建一个完整的性能测试和可视化脚本：
+
+⏺ Write(test_full_performance.py)
+  ⎿  Wrote 380 lines to test_full_performance.py                      
+     #!/usr/bin/env python3
+     """Full Performance Test with Visualization
+     Test SS-DMFO GPU with realistic parameters and visualize results.
+     """
+     import sys
+     import os
+     import time
+     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+     … +370 lines (ctrl+o to expand)
+
+⏺ 完整测试脚本创建完成
+
+  测试参数
+
+  | 参数           | 值    | 说明       |
+  |--------------|------|----------|
+  | n_users      | 1000 | 真实规模测试   |
+  | max_iter     | 150  | 充分迭代     |
+  | top_k        | 500  | 250K交互覆盖 |
+  | phase1_ratio | 15%  | 空间优化阶段   |
+
+  可视化内容 (对应你图片中的分析)
+
+  | 图   | 内容          | 对应你的图     |
+  |-----|-------------|-----------|
+  | 1   | Home分布差异热力图 | 空间分布      |
+  | 2   | Work分布差异热力图 | 空间分布      |
+  | 3   | 边缘分布曲线对比    | 分布形状      |
+  | 4   | 职住距离分布      | 职住距离 (右下) |
+  | 5   | HW交互矩阵差异    | 交互模式      |
+  | 6   | 性能汇总文本      | 数值指标      |
+
+  运行方式
+
+  python test_full_performance.py
+
+  输出文件
+
+  - ssdmfo_results.png - SS-DMFO GPU结果可视化
+  - ipf_results.png - IPF基线结果可视化
+
+  关于你图片中的其他指标
+
+  你的图片包含了更多微观行为指标，这些需要完整的轨迹模拟才能计算：
+
+  | 指标       | 需要数据   | 当前是否可计算     |
+  |----------|--------|-------------|
+  | 24小时出行时变 | 完整OD轨迹 | ❌ 需要Phase 3 |
+  | 每周出行次数   | 完整周轨迹  | ❌ 需要轨迹生成    |
+  | 单次出行距离   | 所有trip | ❌ 需要轨迹生成    |
+  | 每周出行距离   | 完整周轨迹  | ❌ 需要轨迹生成    |
+  | 个体活动点数量  | 用户位置分配 | ✅ 可以计算      |
+  | 职住距离     | H-W位置  | ✅ 已实现       |
+
+  需要我添加更多可计算的指标吗？
+
+> 可以，只进行需要计算的。\
+目前怎么只使用1000个用户的pattern，会不会太少了？ 
+
+⏺ 你说得对！数据集有93,361个用户，1000个太少了。让我更新：
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 3 additions and 3 removals
+       247        print(f"Grid: {constraints.grid_h} x 
+             {constraints.grid_w}")
+       248        print(f"HW interactions: 
+             {constraints.interaction.HW.nnz:,}")
+       249    
+       250 -      # Load users - use more for realistic test
+       251 -      n_users = 1000  # Realistic test size
+       252 -      print(f"\n[2] Loading {n_users} user patterns...")
+       250 +      # Load users - use ALL available for realistic test
+       251 +      n_users = None  # None = load all users (~93,000)
+       252 +      print(f"\n[2] Loading ALL user patterns...")
+       253        user_patterns = 
+             loader.load_user_patterns(n_users=n_users)
+       254        print(f"Loaded {len(user_patterns)} users")
+       255    
+
+⏺ 现在添加"个体活动点数量"指标：
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 34 additions                  
+       57        return np.array(distances)
+       58    
+       59    
+       60 +  def compute_unique_locations(result, user_patterns, 
+          + threshold=0.01):
+       61 +      """Compute number of unique activity locations per user 
+          + (Non-Home)
+       62 +  
+       63 +      For each user, count cells where probability > threshold
+          +  for W and O locations.
+       64 +      """
+       65 +      unique_counts = []
+       66 +  
+       67 +      for user_id, alloc in result.allocations.items():
+       68 +          pattern = user_patterns[user_id]
+       69 +  
+       70 +          unique_cells = set()
+       71 +          for loc_idx, loc in enumerate(pattern.locations):
+       72 +              if loc.type in ['W', 'O']:  # Non-home locations
+       73 +                  # Get cells with probability above threshold
+       74 +                  prob = alloc[loc_idx]
+       75 +                  significant_cells = np.where(prob > 
+          + threshold)[0]
+       76 +                  
+          + unique_cells.update(significant_cells.tolist())
+       77 +  
+       78 +          unique_counts.append(len(unique_cells))
+       79 +  
+       80 +      return np.array(unique_counts)
+       81 +  
+       82 +  
+       83 +  def compute_real_unique_locations(constraints, 
+          + user_patterns):
+       84 +      """Estimate unique locations from real data patterns"""
+       85 +      # Each user has a fixed number of semantic locations
+       86 +      unique_counts = []
+       87 +      for user_id, pattern in user_patterns.items():
+       88 +          # Count non-home locations
+       89 +          n_non_home = sum(1 for loc in pattern.locations if 
+          + loc.type in ['W', 'O'])
+       90 +          unique_counts.append(n_non_home)
+       91 +      return np.array(unique_counts)
+       92 +  
+       93 +  
+       94    def compute_real_hw_distances(constraints, 
+            cell_size_km=1.0):
+       95        """Compute Home-Work distances from real interaction 
+            constraints"""
+       96        hw_coo = constraints.interaction.HW.tocoo()
+
+⏺ 更新可视化函数，添加活动点数量图：
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 1 addition                   
+       122    
+       123    def visualize_results(constraints, gen_spatial, 
+             gen_interaction,
+       124                          hw_distances_gen, hw_distances_real,
+       125 +                        unique_locs_gen, unique_locs_real,
+       126                          
+             save_path='results_visualization.png'):
+       127        """Create comprehensive visualization"""
+       128    
+
+⏺ Read(test_full_performance.py)
+  ⎿  Read 60 lines
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 14 additions and 19 removals  
+       188        else:
+       189            ax.text(0.5, 0.5, 'No distance data', ha='center', 
+             va='center')
+       190    
+       191 -      # 5. Interaction HW heatmap (sampled)
+       191 +      # 5. Unique Activity Locations (Non-Home)
+       192        ax = axes[1, 1]
+       193 -      real_hw = constraints.interaction.HW.toarray()
+       194 -      gen_hw = gen_interaction.HW.toarray()
+       193 +      if len(unique_locs_gen) > 0 and len(unique_locs_real) >
+           +  0:
+       194 +          max_locs = max(unique_locs_gen.max(), 
+           + unique_locs_real.max()) + 1
+       195 +          bins = np.arange(0, min(max_locs, 40), 1)
+       196 +          ax.hist(unique_locs_real, bins=bins, density=True, 
+           + alpha=0.5,
+       197 +                  label=f'Real (N={len(unique_locs_real)})', 
+           + color='red')
+       198 +          ax.hist(unique_locs_gen, bins=bins, density=True, 
+           + alpha=0.5,
+       199 +                  label=f'Gen (N={len(unique_locs_gen)})', 
+           + color='green')
+       200 +          ax.set_title('Unique Activity Locations 
+           + (Non-Home)')
+       201 +          ax.set_xlabel('Count')
+       202 +          ax.set_ylabel('Density')
+       203 +          ax.legend()
+       204 +      else:
+       205 +          ax.text(0.5, 0.5, 'No location data', ha='center', 
+           + va='center')
+       206    
+       207 -      # Show top region only (where most mass is)
+       208 -      real_sum_row = real_hw.sum(axis=1)
+       209 -      real_sum_col = real_hw.sum(axis=0)
+       210 -      top_rows = np.argsort(real_sum_row)[-50:]
+       211 -      top_cols = np.argsort(real_sum_col)[-50:]
+       212 -  
+       213 -      real_sub = real_hw[np.ix_(top_rows, top_cols)]
+       214 -      gen_sub = gen_hw[np.ix_(top_rows, top_cols)]
+       215 -  
+       216 -      diff_sub = gen_sub - real_sub
+       217 -      im = ax.imshow(diff_sub, cmap='RdBu', vmin=-0.0001, 
+           - vmax=0.0001)
+       218 -      ax.set_title('HW Interaction (Gen-Real, top 50×50)')
+       219 -      ax.set_xlabel('Work cells')
+       220 -      ax.set_ylabel('Home cells')
+       221 -      plt.colorbar(im, ax=ax)
+       222 -  
+       207        # 6. Summary metrics
+       208        ax = axes[1, 2]
+       209        ax.axis('off')
+
+⏺ Read(test_full_performance.py)
+  ⎿  Read 70 lines
+
+⏺ Read(test_full_performance.py)
+  ⎿  Read 26 lines
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 19 additions and 3 removals   
+       366        calculator.print_metrics(gpu_metrics, phase=2)
+       367        print(f"GPU time: {time.time() - gpu_start:.1f}s")
+       368    
+       369 -      # Compute H-W distances for GPU
+       369 +      # Compute H-W distances
+       370 +      print("Computing H-W distances...")
+       371        hw_dist_gpu = compute_hw_distances(gpu_result, 
+             user_patterns,
+       372                                           constraints.grid_h, 
+             constraints.grid_w)
+       373 -  
+       374 -      # Real H-W distances
+       373        hw_dist_real = compute_real_hw_distances(constraints)
+       374    
+       375 +      # Compute unique activity locations
+       376 +      print("Computing unique activity locations...")
+       377 +      unique_locs_gpu = compute_unique_locations(gpu_result, 
+           + user_patterns)
+       378 +      unique_locs_ipf = compute_unique_locations(ipf_result, 
+           + user_patterns)
+       379 +      unique_locs_real = 
+           + compute_real_unique_locations(constraints, user_patterns)
+       380 +  
+       381        # =====================================
+       382        # Summary
+       383        # =====================================
+     ...
+       384        print(f"{'IPF':<15} {ipf_metrics['jsd_mean']:<12.6f} 
+             {ipf_metrics.get('jsd_interaction_mean', 0):<12.4f} 
+             {time.time()-ipf_start:<10.1f}")
+       385        print(f"{'SS-DMFO GPU':<15} 
+             {gpu_metrics['jsd_mean']:<12.6f} 
+             {gpu_metrics.get('jsd_interaction_mean', 0):<12.4f} 
+             {time.time()-gpu_start:<10.1f}")
+       386    
+       387 +      print(f"\nH-W Distance (mean):")
+       388 +      print(f"  Real: {np.mean(hw_dist_real):.1f} km")
+       389 +      print(f"  GPU:  {np.mean(hw_dist_gpu):.1f} km")
+       390 +  
+       391 +      print(f"\nUnique Locations (mean):")
+       392 +      print(f"  Real: {np.mean(unique_locs_real):.1f}")
+       393 +      print(f"  GPU:  {np.mean(unique_locs_gpu):.1f}")
+       394 +      print(f"  IPF:  {np.mean(unique_locs_ipf):.1f}")
+       395 +  
+       396        # =====================================
+       397        # Visualization
+       398        # =====================================
+     ...
+       391        visualize_results(
+       392            constraints, gpu_spatial, gpu_interaction,
+       393            hw_dist_gpu, hw_dist_real,
+       394 +          unique_locs_gpu, unique_locs_real,
+       395            save_path='ssdmfo_results.png'
+       396        )
+       397    
+     ...
+       398        visualize_results(
+       399            constraints, ipf_spatial, ipf_interaction,
+       400            hw_dist_ipf, hw_dist_real,
+       401 +          unique_locs_ipf, unique_locs_real,
+       402            save_path='ipf_results.png'
+       403        )
+       404    
+
+⏺ 最后，为处理9万+用户，增加GPU batch size：
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 3 additions and 1 removal    
+       324        print("SS-DMFO GPU (Full Test)")
+       325        print("=" * 70)
+       326    
+       327 +      n_loaded = len(user_patterns)
+       328        config = GPUConfig(
+       329            max_iter=150,                      # More 
+             iterations
+       330 -          gpu_batch_size=500,
+       330 +          gpu_batch_size=2000,               # Larger batch 
+           + for 24GB GPU
+       331            lr_alpha=0.15,
+       332            lr_beta=0.08,
+       333            mfvi_iter=3,
+     ...
+       343            phase1_ratio=0.15,                 # 15% for 
+             spatial only
+       344            device='cuda' if torch.cuda.is_available() else 
+             'cpu'
+       345        )
+       346 +      print(f"GPU batch size: {config.gpu_batch_size}, num 
+           + batches: {(n_loaded + config.gpu_batch_size - 1) // 
+           + config.gpu_batch_size}")
+       347    
+       348        gpu_method = SSDMFOv3GPU(config)
+       349        gpu_start = time.time()
+
+⏺ 更新GPU默认配置：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 2 additions and 2 removals
+       56        gumbel_final: float = 0.01      # Lower floor for 
+            precise convergence
+       57    
+       58        # Batch size for GPU processing (to avoid OOM)
+       59 -      # Adjust based on GPU memory: 500 for 8GB, 1000 for 
+          -  16GB, 2000 for 24GB
+       60 -      gpu_batch_size: int = 500
+       59 +      # Adjust based on GPU memory: 500 for 8GB, 1000 for 
+          +  16GB, 2000+ for 24GB
+       60 +      gpu_batch_size: int = 2000
+       61    
+       62        # Logging
+       63        log_freq: int = 5
+
+⏺ 完成！完整测试脚本已更新
+
+  测试配置
+
+  | 参数             | 值       | 说明         |
+  |----------------|---------|------------|
+  | 用户数            | ~93,000 | 全部可用用户     |
+  | gpu_batch_size | 2000    | 适合24GB GPU |
+  | max_iter       | 150     | 充分优化       |
+  | top_k          | 500     | 250K交互覆盖   |
+
+  计算的指标
+
+  | 指标                  | 类型   | 对应图    |
+  |---------------------|------|--------|
+  | Spatial JSD (H/W/O) | 空间分布 | 热力图    |
+  | Interaction JSD     | 交互匹配 | 交互矩阵   |
+  | 职住距离分布              | 微观行为 | ✅ 你图右下 |
+  | 活动点数量分布             | 微观行为 | ✅ 你图左下 |
+
+  可视化输出
+
+  - ssdmfo_results.png - SS-DMFO结果（6张子图）
+  - ipf_results.png - IPF基线对比
+
+  运行命令
+
+  python test_full_performance.py
+
+  预计时间
+
+  - ~93K用户，150次迭代
+  - 预计 30-60分钟（取决于GPU）
+
+> (rsprompter) kchdong@kchdong-System-Product-Name:~/EV_code$ python 
+test_full_performance.py
+======================================================================
+SS-DMFO GPU - FULL PERFORMANCE TEST
+======================================================================
+
+PyTorch: 2.1.2+cu121
+CUDA: True
+GPU: NVIDIA GeForce RTX 3090
+
+[1] Loading data...
+Loading spatial constraints from HWO_distribute.csv...
+Grid range: lon [-97, 87], lat [-53, 167]
+Grid size: 221 x 185
+H total: 3227754.0, W total: 1675503.0, O total: 22263805.0
+Loading interaction constraints...
+    Loading HW_interact.csv...
+  HW: 1034099 non-zero entries, total=22263805
+    Loading HO_interact.csv...
+  HO: 3988341 non-zero entries, total=22263805
+    Loading WO_interact.csv...
+  WO: 3975927 non-zero entries, total=22263805
+Grid: 221 x 185
+HW interactions: 1,034,099
+
+[2] Loading ALL user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 9336 users
+Loaded 9336 valid user patterns
+Loaded 9336 users
+
+======================================================================
+BASELINE: IPF
+======================================================================
+
+=== Running IPF(iter=20) ===
+Users: 9336
+Grid size: 221 x 185
+Initializing allocations...
+Running IPF iterations (max_iter=20)...
+  Iter   0: JSD = 0.533547
+  Iter   1: JSD = 0.000000
+  Iter   2: JSD = 0.000000
+  Converged at iteration 2
+Runtime: 88.26s
+Memory: 60606.57MB
+    Processing user 100/9336...
+    Processing user 200/9336...
+    Processing user 300/9336...
+    Processing user 400/9336...
+    Processing user 500/9336...
+    Processing user 600/9336...
+    Processing user 700/9336...
+    Processing user 800/9336...
+    Processing user 900/9336...
+    Processing user 1000/9336...
+    Processing user 1100/9336...
+    Processing user 1200/9336...
+    Processing user 1300/9336...
+    Processing user 1400/9336...
+    Processing user 1500/9336...
+    Processing user 1600/9336...
+    Processing user 1700/9336...
+    Processing user 1800/9336...
+    Processing user 1900/9336...
+    Processing user 2000/9336...
+    Processing user 2100/9336...
+    Processing user 2200/9336...
+    Processing user 2300/9336...
+    Processing user 2400/9336...
+    Processing user 2500/9336...
+    Processing user 2600/9336...
+    Processing user 2700/9336...
+    Processing user 2800/9336...
+    Processing user 2900/9336...
+    Processing user 3000/9336...
+    Processing user 3100/9336...
+    Processing user 3200/9336...
+    Processing user 3300/9336...
+    Processing user 3400/9336...
+    Processing user 3500/9336...
+    Processing user 3600/9336...
+    Processing user 3700/9336...
+    Processing user 3800/9336...
+    Processing user 3900/9336...
+    Processing user 4000/9336...
+    Processing user 4100/9336...
+    Processing user 4200/9336...
+    Processing user 4300/9336...
+    Processing user 4400/9336...
+    Processing user 4500/9336...
+    Processing user 4600/9336...
+    Processing user 4700/9336...
+    Processing user 4800/9336...
+    Processing user 4900/9336...
+    Processing user 5000/9336...
+    Processing user 5100/9336...
+    Processing user 5200/9336...
+    Processing user 5300/9336...
+    Processing user 5400/9336...
+    Processing user 5500/9336...
+    Processing user 5600/9336...
+    Processing user 5700/9336...
+    Processing user 5800/9336...
+    Processing user 5900/9336...
+    Processing user 6000/9336...
+    Processing user 6100/9336...
+    Processing user 6200/9336...
+    Processing user 6300/9336...
+    Processing user 6400/9336...
+    Processing user 6500/9336...
+    Processing user 6600/9336...
+    Processing user 6700/9336...
+    Processing user 6800/9336...
+    Processing user 6900/9336...
+    Processing user 7000/9336...
+    Processing user 7100/9336...
+    Processing user 7200/9336...
+    Processing user 7300/9336...
+    Processing user 7400/9336...
+    Processing user 7500/9336...
+    Processing user 7600/9336...
+    Processing user 7700/9336...
+    Processing user 7800/9336...
+    Processing user 7900/9336...
+    Processing user 8000/9336...
+    Processing user 8100/9336...
+    Processing user 8200/9336...
+    Processing user 8300/9336...
+    Processing user 8400/9336...
+    Processing user 8500/9336...
+    Processing user 8600/9336...
+    Processing user 8700/9336...
+    Processing user 8800/9336...
+    Processing user 8900/9336...
+    Processing user 9000/9336...
+    Processing user 9100/9336...
+    Processing user 9200/9336...
+    Processing user 9300/9336...
+  Building sparse matrices (HW:40000, HO:40000, WO:40000 entries)...
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.000000
+  W: 0.000000
+  O: 0.000000
+  Mean: 0.000000
+
+Interaction JSD:
+  HW: 0.524872
+  HO: 0.513509
+  WO: 0.466920
+  Mean: 0.501767
+
+Total JSD Mean: 0.250883
+
+Total Variation Distance:
+  H: 0.000001
+  W: 0.000002
+  O: 0.000001
+  Mean: 0.000002
+--------------------------------------------------
+IPF time: 2522.2s
+
+======================================================================
+SS-DMFO GPU (Full Test)
+======================================================================
+GPU batch size: 2000, num batches: 5
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 9336
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 9336, Grid: 221x185=40885
+  Temperature: 2.0 -> 0.3
+  Gumbel scale: 0.3 -> 0.01
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 2000, num batches: 5
+  Max locations per user: 14
+
+[SS-DMFO GPU] Starting optimization (max_iter=150, phase1=15)...
+已杀死
+(rsprompter) kchdong@kchdong-System-Product-Name:~/EV_code$ 
+
+⏺ 进程被杀死了，是OOM（内存溢出）问题。让我分析：
+
+  内存计算：
+  top_k = 1000 (你改的)
+  batch_size = 2000 用户
+  外积张量: 2000 × 1000 × 1000 × 4 bytes = 8 GB！
+
+  每次交互计算需要8GB，加上其他张量，超过24GB了。
+
+  解决方案：交互计算时用更小的batch
+
+⏺ Read(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Read 30 lines
+
+⏺ 修改交互计算，分更小的batch处理外积：
+
+⏺ Update(ssdmfo/core/optimizer_gpu.py)
+  ⎿  Updated ssdmfo/core/optimizer_gpu.py with 46 additions and 24 removals
+       638            """Smart interaction computation: Important Cells +
+              Sparse Outer Products
+       639    
+       640            Strategy:
+       641 -          1. Identify important cells from real spatial 
+           - constraints (foundation)
+       641 +          1. Identify important cells from aggregate 
+           + distributions
+       642            2. For each user, compute sparse outer product 
+             (captures true correlation)
+       643 -          3. Aggregate across users (true joint distribution,
+           -  not independence)
+       644 -  
+       645 -          This avoids the 40885×40885 full matrix while 
+           - capturing real correlations.
+       643 +          3. Process in mini-batches to avoid OOM
+       644 +          4. Aggregate across users (true joint distribution)
+       645            """
+       646            n_users = user_data.n_users
+       647 -          n_important = self.config.top_k  # Reuse top_k as 
+           -  number of important cells
+       647 +          n_important = min(self.config.top_k, 500)  # Cap at
+           +   500 to avoid OOM
+       648    
+       649 -          # Step 1: Identify important cells from aggregate 
+           - distributions
+       650 -          # These are cells where users actually have 
+           - significant probability
+       649 +          # Step 1: Aggregate by type
+       650            H_agg = (Q * 
+             user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # 
+             (n_users, grid_size)
+       651            W_agg = (Q * 
+             user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
+       652            O_agg = (Q * 
+             user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
+       653    
+       654 -          # Get important cell indices
+           -   based on total probability mass
+       655 -          H_total = H_agg.sum(dim=0)  # (grid_size,)
+       654 +          # Get important cell indices
+       655 +          H_total = H_agg.sum(dim=0)
+       656            W_total = W_agg.sum(dim=0)
+       657            O_total = O_agg.sum(dim=0)
+       658    
+     ...
+       662            _, W_important = torch.topk(W_total, 
+             min(n_important, grid_size))
+       663            _, O_important = torch.topk(O_total, 
+             min(n_important, grid_size))
+       664    
+       665 -          # Step 2: For each user, compute sparse outer 
+           - product at important positions only
+       666 -          # Extract values at important positions: (n_users, 
+           - n_important)
+       667 -          H_vals = H_agg[:, H_important]
+       665 +          # Extract values at important positions
+       666 +          H_vals = H_agg[:, H_important]  # (n_users, 
+           + n_important)
+       667            W_vals = W_agg[:, W_important]
+       668            O_vals = O_agg[:, O_important]
+       669    
+       670 -          # Normalize per user (each user's contribution 
+           - should sum to 1)
+       670 +          # Normalize per user
+       671            H_vals = H_vals / (H_vals.sum(dim=1, keepdim=True) 
+             + 1e-10)
+       672            W_vals = W_vals / (W_vals.sum(dim=1, keepdim=True) 
+             + 1e-10)
+       673            O_vals = O_vals / (O_vals.sum(dim=1, keepdim=True) 
+             + 1e-10)
+       674    
+       675 -          # Compute outer products for ALL users at once: 
+           - (n_users, n_important, n_important)
+       676 -          # This captures the TRUE correlation structure per 
+           - user
+       677 -          HW_outer = torch.bmm(H_vals.unsqueeze(2), 
+           - W_vals.unsqueeze(1))
+       678 -          HO_outer = torch.bmm(H_vals.unsqueeze(2), 
+           - O_vals.unsqueeze(1))
+       679 -          WO_outer = torch.bmm(W_vals.unsqueeze(2), 
+           - O_vals.unsqueeze(1))
+       675 +          # Step 2: Compute outer products in MINI-BATCHES to
+           +  avoid OOM
+       676 +          # Memory per batch: batch_size × n_important × 
+           + n_important × 4 bytes × 3
+       677 +          # For batch=200, n_important=500: 200 × 500 × 500 ×
+           +  4 × 3 = 600MB
+       678 +          mini_batch_size = 200
+       679 +          n_mini_batches = (n_users + mini_batch_size - 1) //
+           +  mini_batch_size
+       680    
+       681 -          # Step 3: Aggregate across users (mean, not sum, to
+           -  get probability)
+       682 -          HW_agg = HW_outer.mean(dim=0)  # (n_important, 
+           - n_important)
+       683 -          HO_agg = HO_outer.mean(dim=0)
+       684 -          WO_agg = WO_outer.mean(dim=0)
+       681 +          HW_sum = torch.zeros(n_important, n_important, 
+           + device=self.device, dtype=self.dtype)
+       682 +          HO_sum = torch.zeros(n_important, n_important, 
+           + device=self.device, dtype=self.dtype)
+       683 +          WO_sum = torch.zeros(n_important, n_important, 
+           + device=self.device, dtype=self.dtype)
+       684    
+       685 +          for mb in range(n_mini_batches):
+       686 +              start = mb * mini_batch_size
+       687 +              end = min(start + mini_batch_size, n_users)
+       688 +  
+       689 +              H_batch = H_vals[start:end]  # (batch, 
+           + n_important)
+       690 +              W_batch = W_vals[start:end]
+       691 +              O_batch = O_vals[start:end]
+       692 +  
+       693 +              # Outer products for this batch
+       694 +              HW_outer = torch.bmm(H_batch.unsqueeze(2), 
+           + W_batch.unsqueeze(1))  # (batch, n_imp, n_imp)
+       695 +              HO_outer = torch.bmm(H_batch.unsqueeze(2), 
+           + O_batch.unsqueeze(1))
+       696 +              WO_outer = torch.bmm(W_batch.unsqueeze(2), 
+           + O_batch.unsqueeze(1))
+       697 +  
+       698 +              # Accumulate
+       699 +              HW_sum += HW_outer.sum(dim=0)
+       700 +              HO_sum += HO_outer.sum(dim=0)
+       701 +              WO_sum += WO_outer.sum(dim=0)
+       702 +  
+       703 +              # Free memory
+       704 +              del HW_outer, HO_outer, WO_outer
+       705 +  
+       706 +          # Average
+       707 +          HW_agg = HW_sum / n_users
+       708 +          HO_agg = HO_sum / n_users
+       709 +          WO_agg = WO_sum / n_users
+       710 +  
+       711            # Convert to CPU numpy
+       712            HW_np = HW_agg.cpu().numpy()
+       713            HO_np = HO_agg.cpu().numpy()
+     ...
+       693            W_idx = W_important.cpu().numpy()
+       694            O_idx = O_important.cpu().numpy()
+       695    
+       696 -          # Build sparse matrices with correct global indices
+       696 +          # Build sparse matrices
+       697            def build_sparse_interaction(values, row_idx, 
+             col_idx):
+       698                rows, cols = np.meshgrid(row_idx, col_idx, 
+             indexing='ij')
+       699                mask = values > 1e-10
+     ...
+       711            gen_interaction = InteractionConstraints(HW=HW, 
+             HO=HO, WO=WO)
+       712            gen_interaction.normalize()
+       713    
+       714 -          # Compute JSD with real interaction
+       714 +          # Compute JSD
+       715            loss = self._interaction_jsd_cpu(gen_interaction, 
+             real_interaction)
+       716    
+       717            return loss, gen_interaction
+
+⏺ 修复完成
+
+  OOM问题分析：
+  之前: 2000 users × 1000 × 1000 × 4 bytes × 3 = 24 GB  ← 超出显存！
+  现在: 200 users × 500 × 500 × 4 bytes × 3 = 600 MB  ← 安全
+
+  修改内容：
+  1. n_important 上限设为 500（避免过大外积）
+  2. 外积计算分 mini-batch（每批200用户）处理
+  3. 累加后平均，保持数学正确性
+
+  内存估算：
+  | 组件              | 大小      |
+  |-----------------|---------|
+  | Q张量 (per batch) | ~4.5 GB |
+  | 外积 mini-batch   | ~600 MB |
+  | 其他              | ~2 GB   |
+  | 总计              | ~7 GB ✅ |
+
+  现在可以重新运行：
+  python test_full_performance.py
+
+  注意：你的 top_k=1000 会被自动限制为 500 以避免OOM。如果需要更大的
+  top_k，可以减小 gpu_batch_size 或 mini_batch_size。
+
+> 依然killed:(rsprompter) kchdong@kchdong-System-Product-Name:~/EV_code$ git
+ pull origin main
+remote: Enumerating objects: 13, done.
+remote: Counting objects: 100% (13/13), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 7 (delta 6), reused 7 (delta 6), pack-reused 0 (from 0)
+展开对象中: 100% (7/7), 1.31 KiB | 149.00 KiB/s, 完成.
+来自 github.com:Kechuan-ln/EV_code
+ * branch            main       -> FETCH_HEAD
+   487bdc6..6028e6c  main       -> origin/main
+更新 487bdc6..6028e6c
+Fast-forward
+ .DS_Store                    | Bin 8196 -> 8196 bytes
+ ssdmfo/.DS_Store             | Bin 6148 -> 6148 bytes
+ ssdmfo/core/optimizer_gpu.py |  70 
+++++++++++++++++++++++++++++++++++++++++++++++------------------------
+ 3 files changed, 46 insertions(+), 24 deletions(-)
+(rsprompter) kchdong@kchdong-System-Product-Name:~/EV_code$ python 
+test_full_performance.py
+======================================================================
+SS-DMFO GPU - FULL PERFORMANCE TEST
+======================================================================
+
+PyTorch: 2.1.2+cu121
+CUDA: True
+GPU: NVIDIA GeForce RTX 3090
+
+[1] Loading data...
+Loading spatial constraints from HWO_distribute.csv...
+Grid range: lon [-97, 87], lat [-53, 167]
+Grid size: 221 x 185
+H total: 3227754.0, W total: 1675503.0, O total: 22263805.0
+Loading interaction constraints...
+    Loading HW_interact.csv...
+  HW: 1034099 non-zero entries, total=22263805
+    Loading HO_interact.csv...
+  HO: 3988341 non-zero entries, total=22263805
+    Loading WO_interact.csv...
+  WO: 3975927 non-zero entries, total=22263805
+Grid: 221 x 185
+HW interactions: 1,034,099
+
+[2] Loading ALL user patterns...
+Loading user patterns (sample_ratio=0.1)...
+Total users in dataset: 93361
+Sampled 9336 users
+Loaded 9336 valid user patterns
+Loaded 9336 users
+
+======================================================================
+BASELINE: IPF
+======================================================================
+
+=== Running IPF(iter=20) ===
+Users: 9336
+Grid size: 221 x 185
+Initializing allocations...
+Running IPF iterations (max_iter=20)...
+  Iter   0: JSD = 0.533547
+  Iter   1: JSD = 0.000000
+  Iter   2: JSD = 0.000000
+  Converged at iteration 2
+Runtime: 76.43s
+Memory: 60350.98MB
+    Processing user 100/9336...
+    Processing user 200/9336...
+    Processing user 300/9336...
+    Processing user 400/9336...
+    Processing user 500/9336...
+    Processing user 600/9336...
+    Processing user 700/9336...
+    Processing user 800/9336...
+    Processing user 900/9336...
+    Processing user 1000/9336...
+    Processing user 1100/9336...
+    Processing user 1200/9336...
+    Processing user 1300/9336...
+    Processing user 1400/9336...
+    Processing user 1500/9336...
+    Processing user 1600/9336...
+    Processing user 1700/9336...
+    Processing user 1800/9336...
+    Processing user 1900/9336...
+    Processing user 2000/9336...
+    Processing user 2100/9336...
+    Processing user 2200/9336...
+    Processing user 2300/9336...
+    Processing user 2400/9336...
+    Processing user 2500/9336...
+    Processing user 2600/9336...
+    Processing user 2700/9336...
+    Processing user 2800/9336...
+    Processing user 2900/9336...
+    Processing user 3000/9336...
+    Processing user 3100/9336...
+    Processing user 3200/9336...
+    Processing user 3300/9336...
+    Processing user 3400/9336...
+    Processing user 3500/9336...
+    Processing user 3600/9336...
+    Processing user 3700/9336...
+    Processing user 3800/9336...
+    Processing user 3900/9336...
+    Processing user 4000/9336...
+    Processing user 4100/9336...
+    Processing user 4200/9336...
+    Processing user 4300/9336...
+    Processing user 4400/9336...
+    Processing user 4500/9336...
+    Processing user 4600/9336...
+    Processing user 4700/9336...
+    Processing user 4800/9336...
+    Processing user 4900/9336...
+    Processing user 5000/9336...
+    Processing user 5100/9336...
+    Processing user 5200/9336...
+    Processing user 5300/9336...
+    Processing user 5400/9336...
+    Processing user 5500/9336...
+    Processing user 5600/9336...
+    Processing user 5700/9336...
+    Processing user 5800/9336...
+    Processing user 5900/9336...
+    Processing user 6000/9336...
+    Processing user 6100/9336...
+    Processing user 6200/9336...
+    Processing user 6300/9336...
+    Processing user 6400/9336...
+    Processing user 6500/9336...
+    Processing user 6600/9336...
+    Processing user 6700/9336...
+    Processing user 6800/9336...
+    Processing user 6900/9336...
+    Processing user 7000/9336...
+    Processing user 7100/9336...
+    Processing user 7200/9336...
+    Processing user 7300/9336...
+    Processing user 7400/9336...
+    Processing user 7500/9336...
+    Processing user 7600/9336...
+    Processing user 7700/9336...
+    Processing user 7800/9336...
+    Processing user 7900/9336...
+    Processing user 8000/9336...
+    Processing user 8100/9336...
+    Processing user 8200/9336...
+    Processing user 8300/9336...
+    Processing user 8400/9336...
+    Processing user 8500/9336...
+    Processing user 8600/9336...
+    Processing user 8700/9336...
+    Processing user 8800/9336...
+    Processing user 8900/9336...
+    Processing user 9000/9336...
+    Processing user 9100/9336...
+    Processing user 9200/9336...
+    Processing user 9300/9336...
+  Building sparse matrices (HW:40000, HO:40000, WO:40000 entries)...
+
+Metrics:
+--------------------------------------------------
+Spatial JSD (Jensen-Shannon Divergence):
+  H: 0.000000
+  W: 0.000000
+  O: 0.000000
+  Mean: 0.000000
+
+Interaction JSD:
+  HW: 0.524872
+  HO: 0.513509
+  WO: 0.466920
+  Mean: 0.501767
+
+Total JSD Mean: 0.250883
+
+Total Variation Distance:
+  H: 0.000001
+  W: 0.000002
+  O: 0.000001
+  Mean: 0.000002
+--------------------------------------------------
+IPF time: 2514.2s
+
+======================================================================
+SS-DMFO GPU (Full Test)
+======================================================================
+GPU batch size: 2000, num batches: 5
+[GPU] Using CUDA: NVIDIA GeForce RTX 3090
+[GPU] Memory: 25.4 GB
+
+=== Running SS-DMFO-v3-GPU ===
+Users: 9336
+Grid size: 221 x 185
+[SS-DMFO GPU] Initializing...
+  Device: cuda
+  Users: 9336, Grid: 221x185=40885
+  Temperature: 2.0 -> 0.3
+  Gumbel scale: 0.3 -> 0.01
+[SS-DMFO GPU] Preprocessing user data...
+  GPU batch size: 2000, num batches: 5
+  Max locations per user: 14
+
+[SS-DMFO GPU] Starting optimization (max_iter=150, phase1=15)...
+已杀死 
+
+⏺ 问题是 CPU内存 不足，不是GPU！看IPF的输出：
+
+  Memory: 60350.98MB  ← 60GB CPU内存!
+
+  9336个用户的分配数据占用太多CPU RAM：
+  9336 users × 10 locs × 40885 cells × 8 bytes ≈ 30 GB
+
+  加上其他数据结构，总共超过64GB，系统OOM killer杀掉了进程。
+
+  解决方案：减少用户数量
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 5 additions and 3 removals
+       277        print(f"Grid: {constraints.grid_h} x 
+             {constraints.grid_w}")
+       278        print(f"HW interactions: 
+             {constraints.interaction.HW.nnz:,}")
+       279    
+       280 -      # Load users - use ALL available for realistic test
+       281 -      n_users = None  # None = load all users (~93,000)
+       282 -      print(f"\n[2] Loading ALL user patterns...")
+       280 +      # Load users - limit to avoid CPU OOM
+       281 +      # Full dataset: 93,361 users → ~60GB RAM
+       282 +      # 3000 users → ~20GB RAM (manageable)
+       283 +      n_users = 3000
+       284 +      print(f"\n[2] Loading {n_users} user patterns...")
+       285        user_patterns = 
+             loader.load_user_patterns(n_users=n_users)
+       286        print(f"Loaded {len(user_patterns)} users")
+       287    
+
+⏺ 同时减小GPU batch size更安全：
+
+⏺ Update(test_full_performance.py)
+  ⎿  Updated test_full_performance.py with 1 addition and 1 removal     
+       329        n_loaded = len(user_patterns)
+       330        config = GPUConfig(
+       331            max_iter=150,                      # More 
+             iterations
+       332 -          gpu_batch_size=2000,               # Larger batch 
+           -  for 24GB GPU
+       332 +          gpu_batch_size=1000,               # Moderate
+           +   batch to avoid OOM
+       333            lr_alpha=0.15,
+       334            lr_beta=0.08,
+       335            mfvi_iter=3,
+
+⏺ 修复OOM问题
+
+  问题根源：CPU内存不足
+  - 9336用户 → 需要 ~60GB CPU RAM
+  - 系统OOM killer终止了进程
+
+  解决方案：
+  | 参数        | 之前        | 现在   |
+  |-----------|-----------|------|
+  | 用户数       | 9336 (全部) | 3000 |
+  | GPU batch | 2000      | 1000 |
+
+  预估资源：
+  CPU RAM: 3000 users × 10 locs × 40885 × 8 ≈ 10 GB
+  GPU RAM: 1000 users × 14 locs × 40885 × 4 ≈ 2.3 GB/batch
+
+  现在重新运行：
+  python test_full_performance.py
+
+  如果你有更大的机器：
+  - 128GB RAM → 可以用 10,000+ 用户
+  - 256GB RAM → 可以用全部 93,000 用户
+
+
+

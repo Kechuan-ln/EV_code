@@ -493,15 +493,21 @@ class SSDMFOSparse(BaseMethod):
                     potentials.restore_state(best_state)
                 break
 
-        # Final pass
+        # Final pass - use alpha only (no beta/MFVI) for stable output
+        # Beta is optimized for aggregate statistics, not individual allocations
         print(f"\n[SS-DMFO Sparse] Computing final allocations...")
         print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
+        print(f"  Using alpha-only mode (no MFVI) for stable final allocations")
 
         final_responses = {}
         for user_data in user_data_batches:
+            # Use low temperature and no Gumbel noise for deterministic output
+            # use_beta=False to avoid MFVI which can destabilize with temperature mismatch
             Q_final = self._batch_forward(
                 user_data, potentials, grid_size,
-                self.config.temp_final, self.config.gumbel_final, use_beta=True
+                temperature=0.5,  # Moderate temperature for sharp but stable distributions
+                gumbel_scale=0.0,  # No noise for final allocation
+                use_beta=False  # Skip MFVI - alpha alone gives good spatial match
             )
 
             Q_np = Q_final.cpu().numpy()

@@ -37,40 +37,40 @@ from ..baselines.base import BaseMethod
 class SparseConfig:
     """Configuration for Sparse SS-DMFO 3.0"""
     # Optimization
-    max_iter: int = 100
-    lr_alpha: float = 0.1
-    lr_beta: float = 0.05
+    max_iter: int = 150
+    lr_alpha: float = 0.15        # Higher for faster spatial convergence
+    lr_beta: float = 0.02         # Lower to avoid destabilizing spatial
     tolerance: float = 1e-4
 
     # MFVI
-    mfvi_iter: int = 5
+    mfvi_iter: int = 3            # Reduced for speed
     mfvi_damping: float = 0.5
 
-    # Temperature annealing
+    # Temperature annealing - key for convergence
     temp_init: float = 2.0
-    temp_final: float = 0.5
+    temp_final: float = 0.1       # Much lower for sharp final distributions
 
-    # Gumbel noise (critical for diversity)
-    gumbel_scale: float = 0.3
-    gumbel_decay: float = 0.995
-    gumbel_final: float = 0.05
+    # Gumbel noise - reduced for better convergence
+    gumbel_scale: float = 0.2     # Lower initial noise
+    gumbel_decay: float = 0.98    # Faster decay
+    gumbel_final: float = 0.01    # Very low final noise
 
     # Batch size for GPU processing (users per batch in forward pass)
-    gpu_batch_size: int = 500  # Reduced to avoid OOM
+    gpu_batch_size: int = 500
 
     # Mini-batch for SDDMM (users per mini-batch for interaction)
-    sddmm_batch_size: int = 200  # Small to fit support set indexing
+    sddmm_batch_size: int = 200
 
     # Logging
-    log_freq: int = 5
+    log_freq: int = 10
 
-    # Phase control
-    interaction_freq: int = 2
+    # Phase control - longer phase 1 for better spatial
+    interaction_freq: int = 3
     phase_separation: bool = True
-    phase1_ratio: float = 0.2
+    phase1_ratio: float = 0.4     # Longer phase 1 (40% instead of 20%)
 
     # Early stopping
-    early_stop_patience: int = 15
+    early_stop_patience: int = 20  # More patience
 
     # GPU settings
     device: str = 'cuda'

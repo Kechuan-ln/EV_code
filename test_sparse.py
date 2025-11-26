@@ -135,7 +135,8 @@ def main():
 
         config = SparseConfig(
             max_iter=100,
-            gpu_batch_size=min(n_users, 1000),
+            gpu_batch_size=min(n_users, 500),   # Reduced to avoid OOM
+            sddmm_batch_size=100,               # Small batches for SDDMM
             lr_alpha=0.1,
             lr_beta=0.05,
             mfvi_iter=3,

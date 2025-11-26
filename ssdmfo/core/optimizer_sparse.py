@@ -55,11 +55,11 @@ class SparseConfig:
     gumbel_decay: float = 0.995
     gumbel_final: float = 0.05
 
-    # Batch size for GPU processing
-    gpu_batch_size: int = 1000
+    # Batch size for GPU processing (users per batch in forward pass)
+    gpu_batch_size: int = 500  # Reduced to avoid OOM
 
-    # Mini-batch for SDDMM (to avoid OOM on large support sets)
-    sddmm_batch_size: int = 500
+    # Mini-batch for SDDMM (users per mini-batch for interaction)
+    sddmm_batch_size: int = 200  # Small to fit support set indexing
 
     # Logging
     log_freq: int = 5
@@ -553,7 +553,7 @@ class SSDMFOSparse(BaseMethod):
                    alpha_per_loc: torch.Tensor,
                    temperature: float,
                    gumbel_scale: float) -> torch.Tensor:
-        """MFVI using SpMM for local field computation"""
+        """MFVI using SpMM for local field computation - memory optimized"""
         n_users, max_locs, grid_size = Q.shape
         damping = self.config.mfvi_damping
         inv_temp = 1.0 / temperature
@@ -570,44 +570,68 @@ class SSDMFOSparse(BaseMethod):
         if not (has_HW or has_HO or has_WO):
             return Q
 
+        # Pre-compute masks once
+        H_mask_float = user_data.H_mask.unsqueeze(-1).float()
+        W_mask_float = user_data.W_mask.unsqueeze(-1).float()
+        O_mask_float = user_data.O_mask.unsqueeze(-1).float()
+        valid_mask_float = user_data.valid_mask.unsqueeze(-1).float()
+
         for mfvi_iter in range(self.config.mfvi_iter):
             noise_scale = gumbel_scale * (0.5 ** mfvi_iter)
 
+            # Sum Q by type (memory: 3 * n_users * grid_size)
+            H_sum = (Q * H_mask_float).sum(dim=1)
+            W_sum = (Q * W_mask_float).sum(dim=1)
+            O_sum = (Q * O_mask_float).sum(dim=1)
+
+            # Compute field contributions via SpMM
+            field = alpha_per_loc.clone()
+
+            if has_HW:
+                HW_contrib = torch.sparse.mm(beta_HW, W_sum.T).T
+                field = field + H_mask_float * HW_contrib.unsqueeze(1)
+                del HW_contrib
+                WH_contrib = torch.sparse.mm(beta_HW.T, H_sum.T).T
+                field = field + W_mask_float * WH_contrib.unsqueeze(1)
+                del WH_contrib
+
+            if has_HO:
+                HO_contrib = torch.sparse.mm(beta_HO, O_sum.T).T
+                field = field + H_mask_float * HO_contrib.unsqueeze(1)
+                del HO_contrib
+                OH_contrib = torch.sparse.mm(beta_HO.T, H_sum.T).T
+                field = field + O_mask_float * OH_contrib.unsqueeze(1)
+                del OH_contrib
+
+            if has_WO:
+                WO_contrib = torch.sparse.mm(beta_WO, O_sum.T).T
+                field = field + W_mask_float * WO_contrib.unsqueeze(1)
+                del WO_contrib
+                OW_contrib = torch.sparse.mm(beta_WO.T, W_sum.T).T
+                field = field + O_mask_float * OW_contrib.unsqueeze(1)
+                del OW_contrib
+
+            del H_sum, W_sum, O_sum
+
+            # Generate Gumbel noise and update Q in-place style
             gumbel = torch.distributions.Gumbel(0, max(noise_scale, 1e-6)).sample(
                 (n_users, max_locs, grid_size)
             ).to(self.device, self.dtype)
 
-            field = alpha_per_loc.clone()
-
-            # Sum Q by type
-            H_sum = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)
-            W_sum = (Q * user_data.W_mask.unsqueeze(-1).float()).sum(dim=1)
-            O_sum = (Q * user_data.O_mask.unsqueeze(-1).float()).sum(dim=1)
-
-            # SpMM: beta @ Q_other
-            if has_HW:
-                HW_contrib = torch.sparse.mm(beta_HW, W_sum.T).T
-                field = field + user_data.H_mask.unsqueeze(-1).float() * HW_contrib.unsqueeze(1)
-                WH_contrib = torch.sparse.mm(beta_HW.T, H_sum.T).T
-                field = field + user_data.W_mask.unsqueeze(-1).float() * WH_contrib.unsqueeze(1)
-
-            if has_HO:
-                HO_contrib = torch.sparse.mm(beta_HO, O_sum.T).T
-                field = field + user_data.H_mask.unsqueeze(-1).float() * HO_contrib.unsqueeze(1)
-                OH_contrib = torch.sparse.mm(beta_HO.T, H_sum.T).T
-                field = field + user_data.O_mask.unsqueeze(-1).float() * OH_contrib.unsqueeze(1)
-
-            if has_WO:
-                WO_contrib = torch.sparse.mm(beta_WO, O_sum.T).T
-                field = field + user_data.W_mask.unsqueeze(-1).float() * WO_contrib.unsqueeze(1)
-                OW_contrib = torch.sparse.mm(beta_WO.T, W_sum.T).T
-                field = field + user_data.O_mask.unsqueeze(-1).float() * OW_contrib.unsqueeze(1)
-
             log_Q = -field * inv_temp + gumbel
-            Q_new = F.softmax(log_Q, dim=-1)
+            del field, gumbel
 
+            Q_new = F.softmax(log_Q, dim=-1)
+            del log_Q
+
+            # Damped update
             Q = damping * Q_new + (1 - damping) * Q
-            Q = Q * user_data.valid_mask.unsqueeze(-1).float()
+            del Q_new
+            Q = Q * valid_mask_float
+
+            # Clear cache periodically
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
 
         return Q
 
@@ -620,17 +644,16 @@ class SSDMFOSparse(BaseMethod):
 
     def _sddmm_aggregate(self, Q: torch.Tensor, user_data: BatchedUserData,
                          support: SupportSet) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """SDDMM: Compute π_gen only at support positions
+        """SDDMM: Compute π_gen only at support positions - memory optimized
 
         This is the key innovation: Instead of computing full outer product O(G²),
         we only compute at positions where π_real > 0, which is O(|S|).
 
-        For each user i and each position (g1, g2) in S:
-            π_gen(g1, g2) += Q_H[i, g1] * Q_W[i, g2]
-
-        This is a Gather-Multiply-Sum pattern (SDDMM core).
+        Memory optimization: Process users in mini-batches to avoid OOM
+        when indexing large support sets.
         """
         n_users = user_data.n_users
+        mini_batch = self.config.sddmm_batch_size
 
         # Aggregate Q by type for each user
         H_agg = (Q * user_data.H_mask.unsqueeze(-1).float()).sum(dim=1)  # (n_users, grid_size)
@@ -642,17 +665,42 @@ class SSDMFOSparse(BaseMethod):
         W_agg = W_agg / (W_agg.sum(dim=1, keepdim=True) + 1e-10)
         O_agg = O_agg / (O_agg.sum(dim=1, keepdim=True) + 1e-10)
 
-        # SDDMM for HW: π_gen[S] = sum_i Q_H[i, S.row] * Q_W[i, S.col]
+        # Initialize accumulators
         HW_rows, HW_cols = support.HW_coords
-        HW_gen = (H_agg[:, HW_rows] * W_agg[:, HW_cols]).sum(dim=0) / n_users
-
-        # SDDMM for HO
         HO_rows, HO_cols = support.HO_coords
-        HO_gen = (H_agg[:, HO_rows] * O_agg[:, HO_cols]).sum(dim=0) / n_users
-
-        # SDDMM for WO
         WO_rows, WO_cols = support.WO_coords
-        WO_gen = (W_agg[:, WO_rows] * O_agg[:, WO_cols]).sum(dim=0) / n_users
+
+        HW_gen = torch.zeros(len(HW_rows), device=self.device, dtype=self.dtype)
+        HO_gen = torch.zeros(len(HO_rows), device=self.device, dtype=self.dtype)
+        WO_gen = torch.zeros(len(WO_rows), device=self.device, dtype=self.dtype)
+
+        # Process users in mini-batches to avoid OOM
+        n_mini_batches = (n_users + mini_batch - 1) // mini_batch
+
+        for mb in range(n_mini_batches):
+            start = mb * mini_batch
+            end = min(start + mini_batch, n_users)
+
+            H_batch = H_agg[start:end]  # (batch, grid_size)
+            W_batch = W_agg[start:end]
+            O_batch = O_agg[start:end]
+
+            # SDDMM for this batch: Gather-Multiply-Sum
+            # Memory: batch_size * |S| per interaction type
+            HW_gen += (H_batch[:, HW_rows] * W_batch[:, HW_cols]).sum(dim=0)
+            HO_gen += (H_batch[:, HO_rows] * O_batch[:, HO_cols]).sum(dim=0)
+            WO_gen += (W_batch[:, WO_rows] * O_batch[:, WO_cols]).sum(dim=0)
+
+            del H_batch, W_batch, O_batch
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+
+        # Average across all users
+        HW_gen = HW_gen / n_users
+        HO_gen = HO_gen / n_users
+        WO_gen = WO_gen / n_users
+
+        del H_agg, W_agg, O_agg
 
         return HW_gen, HO_gen, WO_gen
 

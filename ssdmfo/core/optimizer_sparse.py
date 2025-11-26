@@ -537,12 +537,16 @@ class SSDMFOSparse(BaseMethod):
         loc_types_clamped = user_data.loc_types.clamp(min=0)
         alpha_per_loc = alpha_stack[loc_types_clamped]
 
-        # Gumbel noise for diversity (critical!)
-        gumbel = torch.distributions.Gumbel(0, gumbel_scale).sample(
-            (n_users, max_locs, grid_size)
-        ).to(self.device, self.dtype)
+        # Gumbel noise for diversity (skip if scale is 0 or very small)
+        if gumbel_scale > 1e-6:
+            gumbel = torch.distributions.Gumbel(0, gumbel_scale).sample(
+                (n_users, max_locs, grid_size)
+            ).to(self.device, self.dtype)
+            log_Q = -alpha_per_loc * inv_temp + gumbel
+        else:
+            # No noise - deterministic softmax
+            log_Q = -alpha_per_loc * inv_temp
 
-        log_Q = -alpha_per_loc * inv_temp + gumbel
         Q = F.softmax(log_Q, dim=-1)
         Q = Q * user_data.valid_mask.unsqueeze(-1).float()
 

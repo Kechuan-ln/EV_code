@@ -277,9 +277,11 @@ def main():
     print(f"Grid: {constraints.grid_h} x {constraints.grid_w}")
     print(f"HW interactions: {constraints.interaction.HW.nnz:,}")
 
-    # Load users - use ALL available for realistic test
-    n_users = None  # None = load all users (~93,000)
-    print(f"\n[2] Loading ALL user patterns...")
+    # Load users - limit to avoid CPU OOM
+    # Full dataset: 93,361 users → ~60GB RAM
+    # 3000 users → ~20GB RAM (manageable)
+    n_users = 3000
+    print(f"\n[2] Loading {n_users} user patterns...")
     user_patterns = loader.load_user_patterns(n_users=n_users)
     print(f"Loaded {len(user_patterns)} users")
 
@@ -327,7 +329,7 @@ def main():
     n_loaded = len(user_patterns)
     config = GPUConfig(
         max_iter=150,                      # More iterations
-        gpu_batch_size=2000,               # Larger batch for 24GB GPU
+        gpu_batch_size=1000,               # Moderate batch to avoid OOM
         lr_alpha=0.15,
         lr_beta=0.08,
         mfvi_iter=3,

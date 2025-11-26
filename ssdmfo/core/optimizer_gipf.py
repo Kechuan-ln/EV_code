@@ -48,15 +48,16 @@ class GIPFConfig:
     max_iter: int = 200
     tolerance: float = 1e-5
 
-    # G-IPF specific
-    damping: float = 0.7           # Damping factor λ ∈ (0, 1] for stability
-    alpha_damping: float = 0.8    # Separate damping for alpha updates
-    beta_damping: float = 0.5     # More conservative damping for beta
+    # G-IPF specific - IMPORTANT: Use small damping for stability
+    # The log-ratio updates can be very large, so we need small damping
+    damping: float = 0.1           # Damping factor λ ∈ (0, 1] for stability
+    alpha_damping: float = 0.1     # Conservative for spatial (was 0.8 - too aggressive!)
+    beta_damping: float = 0.05     # Very conservative for interaction
 
     # Temperature (entropy regularization strength)
     temperature: float = 1.0       # Fixed temperature for G-IPF
     temp_anneal: bool = True       # Whether to anneal temperature
-    temp_init: float = 2.0         # Initial temperature if annealing
+    temp_init: float = 1.0         # Lower initial temperature for stability
     temp_final: float = 0.5        # Final temperature if annealing
 
     # MFVI for micro response
@@ -389,18 +390,23 @@ class SSDMFOGIPF(BaseMethod):
             # ============================================
             # STEP 2: G-IPF ALPHA UPDATE (Spatial Projection)
             # ============================================
-            # α_new = α_old + T * (log μ_real - log μ_gen)
-            # With damping: α_new = (1-λ)*α_old + λ*[α_old + T*(log μ_real - log μ_gen)]
-            #             = α_old + λ*T*(log μ_real - log μ_gen)
+            # Since Q ∝ exp(-α / T), higher α = lower probability
+            # To increase probability where gen < target, we need to DECREASE α
+            # G-IPF update: α_new = α_old - T * (log μ_gen - log μ_real)
+            #             = α_old + T * (log μ_real - log μ_gen)  [WRONG for our parameterization]
+            # Correct for Q ∝ exp(-α/T): α_new = α_old - T * (log μ_real - log μ_gen)
+            #
+            # When gen < target: log_target - log_gen > 0, so we subtract → α decreases → Q increases ✓
 
             alpha_update_H = temperature * (log_target_H - log_gen_H)
             alpha_update_W = temperature * (log_target_W - log_gen_W)
             alpha_update_O = temperature * (log_target_O - log_gen_O)
 
             damping = self.config.alpha_damping
-            potentials.alpha_H = potentials.alpha_H + damping * alpha_update_H
-            potentials.alpha_W = potentials.alpha_W + damping * alpha_update_W
-            potentials.alpha_O = potentials.alpha_O + damping * alpha_update_O
+            # SUBTRACT because Q ∝ exp(-α/T)
+            potentials.alpha_H = potentials.alpha_H - damping * alpha_update_H
+            potentials.alpha_W = potentials.alpha_W - damping * alpha_update_W
+            potentials.alpha_O = potentials.alpha_O - damping * alpha_update_O
 
             # ============================================
             # STEP 3: GAUSS-SEIDEL RE-COMPUTATION (Optional)
@@ -452,16 +458,21 @@ class SSDMFOGIPF(BaseMethod):
                 last_interaction_loss = self._interaction_jsd_sparse(HW_gen, HO_gen, WO_gen, support)
                 interaction_history.append(last_interaction_loss)
 
-                # G-IPF update: β_new = β_old + T * (log π_real - log π_gen)
+                # G-IPF update for beta
+                # Beta is used in MFVI as: field += β·mean_field, then Q ∝ exp(-field/T)
+                # Higher β at (h,w) → higher field → lower Q (similar to alpha)
+                # So when gen < real at (h,w), we want β to DECREASE to encourage co-occurrence
+                # β_new = β_old - T * (log π_real - log π_gen)
                 beta_damping = self.config.beta_damping
 
                 beta_update_HW = temperature * (support.HW_log - log_HW_gen)
                 beta_update_HO = temperature * (support.HO_log - log_HO_gen)
                 beta_update_WO = temperature * (support.WO_log - log_WO_gen)
 
-                potentials.beta_HW = potentials.beta_HW + beta_damping * beta_update_HW
-                potentials.beta_HO = potentials.beta_HO + beta_damping * beta_update_HO
-                potentials.beta_WO = potentials.beta_WO + beta_damping * beta_update_WO
+                # SUBTRACT because higher β → lower probability (like alpha)
+                potentials.beta_HW = potentials.beta_HW - beta_damping * beta_update_HW
+                potentials.beta_HO = potentials.beta_HO - beta_damping * beta_update_HO
+                potentials.beta_WO = potentials.beta_WO - beta_damping * beta_update_WO
 
                 # Early stopping based on total loss
                 total_loss = last_spatial_loss + 0.5 * last_interaction_loss

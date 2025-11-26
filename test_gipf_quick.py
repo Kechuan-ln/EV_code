@@ -43,30 +43,30 @@ print(f"Loaded {len(user_patterns)} users")
 # Test G-IPF optimizer
 print("\n[Testing G-IPF SS-DMFO 4.0...]")
 config = GIPFConfig(
-    max_iter=100,              # Shorter for quick test
+    max_iter=150,              # More iterations for G-IPF
     gpu_batch_size=100,
     sddmm_batch_size=100,
-    # G-IPF parameters
-    alpha_damping=0.8,
-    beta_damping=0.5,
-    # Temperature
+    # G-IPF parameters - IMPORTANT: use small damping for stability
+    alpha_damping=0.1,         # Conservative! Large updates can destabilize
+    beta_damping=0.05,         # Very conservative for interaction
+    # Temperature - lower is more stable
     temp_anneal=True,
-    temp_init=2.0,
-    temp_final=0.5,
+    temp_init=1.0,             # Lower temp = smaller updates
+    temp_final=0.3,
     # MFVI
-    mfvi_iter=5,
+    mfvi_iter=3,               # Fewer MFVI iters in pure spatial phase
     mfvi_damping=0.5,
-    # Gumbel
-    gumbel_scale=0.1,
+    # Gumbel - lower noise for G-IPF
+    gumbel_scale=0.05,
     gumbel_decay=0.99,
     gumbel_final=0.01,
     # Schedule
-    spatial_first_iters=20,
-    interaction_freq=1,
-    gauss_seidel=True,
+    spatial_first_iters=50,    # Longer pure spatial phase
+    interaction_freq=2,        # Less frequent interaction updates
+    gauss_seidel=False,        # Simpler for now
     # Logging
     log_freq=10,
-    early_stop_patience=20,
+    early_stop_patience=30,
     device='cuda' if torch.cuda.is_available() else 'cpu'
 )
 

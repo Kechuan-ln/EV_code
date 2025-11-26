@@ -107,7 +107,7 @@ def main():
     results = {}
 
     # Test with increasing user counts
-    for n_users in [100, 500, 1000]:
+    for n_users in [100, 1000, 5000]:
         print(f"\n{'#' * 70}")
         print(f"# Testing with {n_users} users")
         print('#' * 70)

@@ -360,6 +360,8 @@ class SSDMFOSparse(BaseMethod):
         best_interaction_loss = float('inf')
         last_interaction_loss = 0.0
         best_state = None
+        best_temperature = self.config.temp_init  # Save temperature at best iter
+        best_gumbel = self.config.gumbel_scale
         no_improve_count = 0
         best_iter = 0
 
@@ -465,6 +467,8 @@ class SSDMFOSparse(BaseMethod):
                 if last_interaction_loss < best_interaction_loss - 0.001:
                     best_interaction_loss = last_interaction_loss
                     best_state = potentials.copy_state()
+                    best_temperature = temperature  # Save temperature at best iter
+                    best_gumbel = gumbel_scale
                     no_improve_count = 0
                     best_iter = iteration
                 else:
@@ -493,14 +497,13 @@ class SSDMFOSparse(BaseMethod):
                     potentials.restore_state(best_state)
                 break
 
-        # Final pass - use alpha only (no beta/MFVI) for stable output
-        # Use multiple samples with small noise and average for stable statistics
+        # Final pass - use saved temperature and gumbel from best iteration
         print(f"\n[SS-DMFO Sparse] Computing final allocations...")
         print(f"  Best interaction: {best_interaction_loss:.4f} at iter {best_iter}")
-        print(f"  Using alpha-only mode with averaged samples")
+        print(f"  Using T={best_temperature:.2f}, Gumbel={best_gumbel:.3f} (from best iter)")
 
         final_responses = {}
-        n_samples = 5  # Average over multiple noisy samples for stability
+        n_samples = 10  # Average multiple samples for stable statistics
 
         for user_data in user_data_batches:
             Q_sum = None
@@ -508,9 +511,9 @@ class SSDMFOSparse(BaseMethod):
             for sample_idx in range(n_samples):
                 Q_sample = self._batch_forward(
                     user_data, potentials, grid_size,
-                    temperature=1.0,  # Match optimization temperature
-                    gumbel_scale=0.05,  # Small noise for diversity
-                    use_beta=False  # Skip MFVI to avoid temperature mismatch
+                    temperature=best_temperature,  # Use temperature from best iter
+                    gumbel_scale=best_gumbel,  # Use gumbel from best iter
+                    use_beta=False  # Skip MFVI (beta already in alpha via optimization)
                 )
 
                 if Q_sum is None:

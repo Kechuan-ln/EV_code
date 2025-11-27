@@ -1,0 +1,168 @@
+{
+  "IPF": {
+    "spatial_H": 7.395723812851883e-08,
+    "spatial_W": 8.919470249581381e-08,
+    "spatial_O": 6.899134648948382e-08,
+    "spatial_mean": 7.738109570460549e-08,
+    "interact_HW": 0.6438365504079764,
+    "interact_HO": 0.6420658569729887,
+    "interact_WO": 0.6185171288852388,
+    "interact_mean": 0.6348065120887346,
+    "time": 0.47481822967529297,
+    "config": {
+      "method": "IPF"
+    }
+  },
+  "A1_low_damp": {
+    "spatial_H": 0.08060149216928211,
+    "spatial_W": 0.12070278771965089,
+    "spatial_O": 0.12093089823256209,
+    "spatial_mean": 0.10741172604049837,
+    "interact_HW": 0.6437883815524231,
+    "interact_HO": 0.6419349930651107,
+    "interact_WO": 0.6184687472229315,
+    "interact_mean": 0.6347307072801551,
+    "time": 113.97502112388611,
+    "config": {
+      "alpha_damping": 0.05,
+      "beta_damping": 0.01,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": true,
+      "temp_init": 1.0,
+      "mfvi_iter": 3
+    }
+  },
+  "A2_mid_damp": {
+    "spatial_H": 0.11332954082448667,
+    "spatial_W": 0.1695297716270745,
+    "spatial_O": 0.1679923081416438,
+    "spatial_mean": 0.1502838735310683,
+    "interact_HW": 0.6433796293782803,
+    "interact_HO": 0.6414961339319358,
+    "interact_WO": 0.6186281913682294,
+    "interact_mean": 0.6345013182261485,
+    "time": 115.90113544464111,
+    "config": {
+      "alpha_damping": 0.1,
+      "beta_damping": 0.02,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": true,
+      "temp_init": 1.0,
+      "mfvi_iter": 3
+    }
+  },
+  "A3_high_damp": {
+    "spatial_H": 0.13980584980014146,
+    "spatial_W": 0.206504559759695,
+    "spatial_O": 0.20390091296153262,
+    "spatial_mean": 0.18340377417378972,
+    "interact_HW": 0.6434781933677659,
+    "interact_HO": 0.6415980744717675,
+    "interact_WO": 0.6188497935414223,
+    "interact_mean": 0.6346420204603186,
+    "time": 116.09769940376282,
+    "config": {
+      "alpha_damping": 0.2,
+      "beta_damping": 0.05,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": true,
+      "temp_init": 1.0,
+      "mfvi_iter": 3
+    }
+  },
+  "B1_no_freeze": {
+    "spatial_H": 0.08061508032994097,
+    "spatial_W": 0.12067498222866753,
+    "spatial_O": 0.12092295735180994,
+    "spatial_mean": 0.10740433997013947,
+    "interact_HW": 0.6433002256693396,
+    "interact_HO": 0.6413432621589155,
+    "interact_WO": 0.6184695007354516,
+    "interact_mean": 0.6343709961879022,
+    "time": 143.62634754180908,
+    "config": {
+      "alpha_damping": 0.05,
+      "beta_damping": 0.02,
+      "freeze_alpha_in_phase2": false,
+      "use_beta_in_final": true,
+      "temp_init": 1.0,
+      "mfvi_iter": 3
+    }
+  },
+  "C1_no_beta_final": {
+    "spatial_H": 0.11489943737938282,
+    "spatial_W": 0.17187321550072493,
+    "spatial_O": 0.17025148117777272,
+    "spatial_mean": 0.1523413780192935,
+    "interact_HW": 0.6431755032647521,
+    "interact_HO": 0.6406855187436653,
+    "interact_WO": 0.6183262208695885,
+    "interact_mean": 0.6340624142926686,
+    "time": 102.2759141921997,
+    "config": {
+      "alpha_damping": 0.1,
+      "beta_damping": 0.02,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": false,
+      "temp_init": 1.0,
+      "mfvi_iter": 3
+    }
+  },
+  "D1_high_temp": {
+    "spatial_H": 0.14899850504797021,
+    "spatial_W": 0.2189236971302005,
+    "spatial_O": 0.21578948994742278,
+    "spatial_mean": 0.19457056404186449,
+    "interact_HW": 0.6440060657312461,
+    "interact_HO": 0.6420315346083497,
+    "interact_WO": 0.6189372945763753,
+    "interact_mean": 0.6349916316386569,
+    "time": 116.34681034088135,
+    "config": {
+      "alpha_damping": 0.1,
+      "beta_damping": 0.02,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": true,
+      "temp_init": 2.0,
+      "mfvi_iter": 3
+    }
+  },
+  "E1_more_mfvi": {
+    "spatial_H": 0.11329498814984909,
+    "spatial_W": 0.16955365482848855,
+    "spatial_O": 0.167982937704569,
+    "spatial_mean": 0.15027719356096889,
+    "interact_HW": 0.6434389192400388,
+    "interact_HO": 0.6415792927202557,
+    "interact_WO": 0.618625314803233,
+    "interact_mean": 0.6345478422545092,
+    "time": 153.19191241264343,
+    "config": {
+      "alpha_damping": 0.1,
+      "beta_damping": 0.02,
+      "freeze_alpha_in_phase2": true,
+      "use_beta_in_final": true,
+      "temp_init": 1.0,
+      "mfvi_iter": 5
+    }
+  },
+  "F1_balanced": {
+    "spatial_H": 0.12613778202891116,
+    "spatial_W": 0.18784564742242232,
+    "spatial_O": 0.18564981133922337,
+    "spatial_mean": 0.1665444135968523,
+    "interact_HW": 0.6439041083569754,
+    "interact_HO": 0.6419803361699472,
+    "interact_WO": 0.6187237464767192,
+    "interact_mean": 0.6348693970012139,
+    "time": 144.0953345298767,
+    "config": {
+      "alpha_damping": 0.08,
+      "beta_damping": 0.03,
+      "freeze_alpha_in_phase2": false,
+      "use_beta_in_final": true,
+      "temp_init": 1.5,
+      "mfvi_iter": 3
+    }
+  }
+}

@@ -546,9 +546,9 @@ class SSDMFO_RD:
             o_alloc = constraints.spatial.O.flatten()  # O uses spatial prior for now
 
             for loc_idx, loc in enumerate(pattern.locations):
-                if loc.startswith('H'):
+                if loc.type == 'H':
                     user_alloc[loc_idx] = h_alloc
-                elif loc.startswith('W'):
+                elif loc.type == 'W':
                     user_alloc[loc_idx] = w_alloc
                 else:  # O
                     user_alloc[loc_idx] = o_alloc

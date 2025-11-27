@@ -172,27 +172,28 @@ def main():
             max_iter=200,
             gpu_batch_size=min(n_users, 500),
             sddmm_batch_size=100,
-            # G-IPF specific
-            alpha_damping=0.8,           # Conservative for spatial
-            beta_damping=0.5,            # More conservative for interaction
-            # Temperature
+            # G-IPF specific - CONSERVATIVE damping is critical!
+            alpha_damping=0.1,           # Very conservative for spatial
+            beta_damping=0.02,           # Even more conservative for interaction
+            # Temperature - lower is more stable
             temp_anneal=True,
-            temp_init=2.0,
-            temp_final=0.5,
-            # MFVI
-            mfvi_iter=5,
-            mfvi_damping=0.5,
-            # Gumbel
-            gumbel_scale=0.1,
+            temp_init=1.0,               # Lower initial temp
+            temp_final=0.3,
+            # MFVI - fewer iterations to reduce instability
+            mfvi_iter=2,
+            mfvi_damping=0.3,
+            # Gumbel - lower noise
+            gumbel_scale=0.05,
             gumbel_decay=0.99,
             gumbel_final=0.01,
             # Schedule
-            spatial_first_iters=30,      # Pure spatial first
-            interaction_freq=1,          # Update interaction every iter
-            gauss_seidel=True,           # Re-run MFVI between α and β
+            spatial_first_iters=50,      # Longer pure spatial phase
+            interaction_freq=3,          # Less frequent interaction updates
+            gauss_seidel=False,          # Disable for stability
+            freeze_alpha_in_phase2=True, # IMPORTANT: Freeze alpha when optimizing interaction
             # Logging
             log_freq=10,
-            early_stop_patience=30,
+            early_stop_patience=40,
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
 

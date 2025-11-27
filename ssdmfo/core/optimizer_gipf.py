@@ -77,6 +77,7 @@ class GIPFConfig:
     spatial_first_iters: int = 20  # Pure spatial updates before introducing interaction
     interaction_freq: int = 1      # Update interaction every N iterations (G-IPF: every iter)
     gauss_seidel: bool = True      # Gauss-Seidel style: re-run MFVI between α and β updates
+    freeze_alpha_in_phase2: bool = True  # Freeze alpha when optimizing interaction (prevents spatial degradation)
 
     # Logging
     log_freq: int = 10
@@ -310,6 +311,7 @@ class SSDMFOGIPF(BaseMethod):
 
         print(f"\n[G-IPF] Starting optimization (max_iter={self.config.max_iter})...")
         print(f"  Pure spatial phase: first {self.config.spatial_first_iters} iterations")
+        print(f"  Freeze alpha in phase 2: {self.config.freeze_alpha_in_phase2}")
         print(f"  Gauss-Seidel updates: {self.config.gauss_seidel}")
 
         last_spatial_loss = 0.0
@@ -392,21 +394,22 @@ class SSDMFOGIPF(BaseMethod):
             # ============================================
             # Since Q ∝ exp(-α / T), higher α = lower probability
             # To increase probability where gen < target, we need to DECREASE α
-            # G-IPF update: α_new = α_old - T * (log μ_gen - log μ_real)
-            #             = α_old + T * (log μ_real - log μ_gen)  [WRONG for our parameterization]
             # Correct for Q ∝ exp(-α/T): α_new = α_old - T * (log μ_real - log μ_gen)
-            #
             # When gen < target: log_target - log_gen > 0, so we subtract → α decreases → Q increases ✓
 
-            alpha_update_H = temperature * (log_target_H - log_gen_H)
-            alpha_update_W = temperature * (log_target_W - log_gen_W)
-            alpha_update_O = temperature * (log_target_O - log_gen_O)
+            # Option to freeze alpha in phase 2 to prevent spatial degradation
+            should_update_alpha = not use_beta or not self.config.freeze_alpha_in_phase2
 
-            damping = self.config.alpha_damping
-            # SUBTRACT because Q ∝ exp(-α/T)
-            potentials.alpha_H = potentials.alpha_H - damping * alpha_update_H
-            potentials.alpha_W = potentials.alpha_W - damping * alpha_update_W
-            potentials.alpha_O = potentials.alpha_O - damping * alpha_update_O
+            if should_update_alpha:
+                alpha_update_H = temperature * (log_target_H - log_gen_H)
+                alpha_update_W = temperature * (log_target_W - log_gen_W)
+                alpha_update_O = temperature * (log_target_O - log_gen_O)
+
+                damping = self.config.alpha_damping
+                # SUBTRACT because Q ∝ exp(-α/T)
+                potentials.alpha_H = potentials.alpha_H - damping * alpha_update_H
+                potentials.alpha_W = potentials.alpha_W - damping * alpha_update_W
+                potentials.alpha_O = potentials.alpha_O - damping * alpha_update_O
 
             # ============================================
             # STEP 3: GAUSS-SEIDEL RE-COMPUTATION (Optional)
@@ -493,7 +496,13 @@ class SSDMFOGIPF(BaseMethod):
 
             # Logging
             iter_time = time.time() - iter_start
-            phase_str = "Spatial" if not use_beta else "Full"
+            if not use_beta:
+                phase_str = "Spatial"
+            elif self.config.freeze_alpha_in_phase2:
+                phase_str = "Interact"  # Alpha frozen, only optimizing interaction
+            else:
+                phase_str = "Full"
+
             if iteration % self.config.log_freq == 0 or iteration < 5:
                 interact_str = f"{last_interaction_loss:.4f}" if last_interaction_loss > 0 else "---"
                 print(f"  Iter {iteration:3d} [{phase_str}]: Spatial={last_spatial_loss:.4f}, "

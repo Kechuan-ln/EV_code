@@ -64,6 +64,7 @@ config = GIPFConfig(
     spatial_first_iters=50,    # Longer pure spatial phase
     interaction_freq=2,        # Less frequent interaction updates
     gauss_seidel=False,        # Simpler for now
+    freeze_alpha_in_phase2=True, # Freeze alpha when optimizing interaction
     # Logging
     log_freq=10,
     early_stop_patience=30,

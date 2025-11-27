@@ -566,18 +566,8 @@ class SSDMFO_RD:
             print(f"{'='*60}")
 
         return Result(
+            method_name=f'SS-DMFO 5.0 R&D ({self.config.decomposition_method.upper()})',
             allocations=allocations,
-            metadata={
-                'method': 'SS-DMFO 5.0 R&D',
-                'decomposition': self.config.decomposition_method,
-                'phase1_time': phase1_time,
-                'phase2_time': phase2_time,
-                'total_time': total_time,
-                'pi_stars_nnz': {k: v.nnz for k, v in pi_stars.items()},
-                'sinkhorn_converged': {
-                    'HW': hist_hw.get('converged', False),
-                    'HO': hist_ho.get('converged', False),
-                    'WO': hist_wo.get('converged', False),
-                }
-            }
+            runtime=total_time,
+            iterations=hist_hw.get('iterations', 0) + hist_ho.get('iterations', 0) + hist_wo.get('iterations', 0),
         )

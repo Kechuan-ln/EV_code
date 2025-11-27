@@ -190,7 +190,8 @@ def main():
             spatial_first_iters=50,      # Longer pure spatial phase
             interaction_freq=3,          # Less frequent interaction updates
             gauss_seidel=False,          # Disable for stability
-            freeze_alpha_in_phase2=True, # IMPORTANT: Freeze alpha when optimizing interaction
+            freeze_alpha_in_phase2=True, # Freeze alpha when optimizing interaction
+            use_beta_in_final=True,      # Use optimized beta in final allocation
             # Logging
             log_freq=10,
             early_stop_patience=40,

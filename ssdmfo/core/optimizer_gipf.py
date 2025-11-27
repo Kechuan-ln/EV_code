@@ -78,6 +78,7 @@ class GIPFConfig:
     interaction_freq: int = 1      # Update interaction every N iterations (G-IPF: every iter)
     gauss_seidel: bool = True      # Gauss-Seidel style: re-run MFVI between α and β updates
     freeze_alpha_in_phase2: bool = True  # Freeze alpha when optimizing interaction (prevents spatial degradation)
+    use_beta_in_final: bool = True       # Use MFVI (with beta) for final allocation (improves interaction)
 
     # Logging
     log_freq: int = 10
@@ -311,7 +312,10 @@ class SSDMFOGIPF(BaseMethod):
 
         print(f"\n[G-IPF] Starting optimization (max_iter={self.config.max_iter})...")
         print(f"  Pure spatial phase: first {self.config.spatial_first_iters} iterations")
-        print(f"  Freeze alpha in phase 2: {self.config.freeze_alpha_in_phase2}")
+        if self.config.freeze_alpha_in_phase2:
+            print(f"  Phase 2: Dual-Q strategy (alpha-only for spatial, MFVI for interaction)")
+        else:
+            print(f"  Phase 2: Full optimization (alpha + beta)")
         print(f"  Gauss-Seidel updates: {self.config.gauss_seidel}")
 
         last_spatial_loss = 0.0
@@ -352,26 +356,58 @@ class SSDMFOGIPF(BaseMethod):
                 HO_gen = torch.zeros(len(support.HO_coords[0]), device=self.device, dtype=self.dtype)
                 WO_gen = torch.zeros(len(support.WO_coords[0]), device=self.device, dtype=self.dtype)
 
+            # DUAL Q STRATEGY when freeze_alpha_in_phase2=True:
+            # - Q_spatial: computed WITHOUT beta (alpha-only) for spatial stats
+            # - Q_interact: computed WITH beta (MFVI) for interaction stats
+            # This keeps spatial stable while allowing interaction optimization
+            use_dual_q = use_beta and self.config.freeze_alpha_in_phase2
+
             for user_data in user_data_batches:
-                Q = self._batch_forward(
-                    user_data, potentials, grid_size,
-                    temperature, gumbel_scale, use_beta
-                )
+                if use_dual_q:
+                    # Compute Q_spatial (alpha-only) for spatial statistics
+                    Q_spatial = self._batch_forward(
+                        user_data, potentials, grid_size,
+                        temperature, gumbel_scale, use_beta=False  # No MFVI
+                    )
+                    batch_H, batch_W, batch_O = self._aggregate_spatial(Q_spatial, user_data)
+                    gen_H += batch_H
+                    gen_W += batch_W
+                    gen_O += batch_O
+                    del Q_spatial
 
-                # Aggregate spatial
-                batch_H, batch_W, batch_O = self._aggregate_spatial(Q, user_data)
-                gen_H += batch_H
-                gen_W += batch_W
-                gen_O += batch_O
+                    # Compute Q_interact (with beta/MFVI) for interaction statistics
+                    if compute_interaction:
+                        Q_interact = self._batch_forward(
+                            user_data, potentials, grid_size,
+                            temperature, gumbel_scale, use_beta=True  # With MFVI
+                        )
+                        hw_batch, ho_batch, wo_batch = self._sddmm_aggregate(Q_interact, user_data, support)
+                        HW_gen += hw_batch
+                        HO_gen += ho_batch
+                        WO_gen += wo_batch
+                        del Q_interact
+                else:
+                    # Standard: single Q for both spatial and interaction
+                    Q = self._batch_forward(
+                        user_data, potentials, grid_size,
+                        temperature, gumbel_scale, use_beta
+                    )
 
-                # SDDMM for interaction
-                if compute_interaction:
-                    hw_batch, ho_batch, wo_batch = self._sddmm_aggregate(Q, user_data, support)
-                    HW_gen += hw_batch
-                    HO_gen += ho_batch
-                    WO_gen += wo_batch
+                    # Aggregate spatial
+                    batch_H, batch_W, batch_O = self._aggregate_spatial(Q, user_data)
+                    gen_H += batch_H
+                    gen_W += batch_W
+                    gen_O += batch_O
 
-                del Q
+                    # SDDMM for interaction
+                    if compute_interaction:
+                        hw_batch, ho_batch, wo_batch = self._sddmm_aggregate(Q, user_data, support)
+                        HW_gen += hw_batch
+                        HO_gen += ho_batch
+                        WO_gen += wo_batch
+
+                    del Q
+
                 if self.device.type == 'cuda':
                     torch.cuda.empty_cache()
 
@@ -499,7 +535,7 @@ class SSDMFOGIPF(BaseMethod):
             if not use_beta:
                 phase_str = "Spatial"
             elif self.config.freeze_alpha_in_phase2:
-                phase_str = "Interact"  # Alpha frozen, only optimizing interaction
+                phase_str = "Dual-Q"  # Dual Q strategy: alpha-only for spatial, MFVI for interaction
             else:
                 phase_str = "Full"
 
@@ -538,6 +574,10 @@ class SSDMFOGIPF(BaseMethod):
         # Use lower temperature for sharper final distributions
         final_temp = self.config.temp_final if self.config.temp_anneal else self.config.temperature * 0.5
 
+        # Decide whether to use beta in final allocation
+        use_beta_final = self.config.use_beta_in_final
+        print(f"  Using MFVI (beta) in final allocation: {use_beta_final}")
+
         for user_data in user_data_batches:
             Q_sum = None
 
@@ -546,7 +586,7 @@ class SSDMFOGIPF(BaseMethod):
                     user_data, potentials, grid_size,
                     temperature=final_temp,
                     gumbel_scale=self.config.gumbel_final,
-                    use_beta=False  # Skip MFVI for final pass
+                    use_beta=use_beta_final  # Use beta based on config
                 )
 
                 if Q_sum is None:
